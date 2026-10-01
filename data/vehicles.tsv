@@ -1,0 +1,4 @@
+id	name	type	hullLength_m	hullDiameter_m	xcg_m	volumeCoeff	wettedCoeff	pitchInertia_kgm2	extraPitchDamping_Nms	frontArea_m2	frontAR	frontX_m	rearArea_m2	rearAR	rearX_m	maxPower_kW	jetEfficiency	nozzleDiameter_m	bsfc_kgpkWh	emptyMass_kg	fuelMass_kg	cruciform
+jetify-baseline	Baseline (MATLAB reference masses, S = 0.20 m², AR 2.5)	reference	1.8	0.2	0.85	0.8	0.9		0	0.05	2.5	0.35	0.15	2.5	1.65	15	0.6	0.06	0.45	35	15	true
+jetify-compact	Compact sprint (short, high power)	concept	1.2	0.16	0.55	0.8	0.9		0	0.012	2	0.25	0.04	2	1.1	20	0.55	0.05	0.5	18	6	true
+jetify-transit	Long transit (slender, large fuel fraction)	concept	3.2	0.32	1.5	0.85	0.92		0	0.04	3	0.6	0.12	3	2.95	30	0.62	0.08	0.42	140	90	true

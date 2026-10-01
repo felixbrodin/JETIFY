@@ -1,0 +1,6 @@
+id;name;type;weightKg
+pl-none;No payload;none;0
+pl-ctd;CTD / environment sensor;sensor;1
+pl-camera;Camera + lights;sensor;2
+pl-sss;Side-scan sonar module;sensor;4
+pl-comms;Comms / relay buoy;system;3

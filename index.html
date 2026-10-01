@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Jetify – waterjet AUV range & trajectory stability</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header class="topbar">
+  <div>
+    <h1>Jetify</h1>
+    <p class="tagline">Waterjet AUV design tool · one-way range (Breguet, jet fuel) · trajectory stability · von Kármán turbulence in the frequency domain</p>
+  </div>
+  <div id="flash" class="flash hidden"></div>
+</header>
+
+<div id="banner" class="banner hidden">
+  <strong id="bannerTitle">Default profiles were not loaded</strong>
+  <p id="bannerText"></p>
+  <button class="btn" id="retryBtn">Retry</button>
+</div>
+
+<main class="layout">
+
+  <!-- ==================== DESIGN INPUTS ==================== -->
+  <section class="col config" aria-label="Design inputs">
+    <div class="card">
+      <h2>1 · Vehicle profile</h2>
+      <label class="field">Start from profile
+        <select id="vehicleSelect" class="input"></select>
+      </label>
+      <p class="hint">Selecting a profile loads its values into the design boxes below. Edit freely, then save the result as your own profile.</p>
+      <div class="row">
+        <label class="field grow">Name for saved design<input id="saveName" class="input" placeholder="My AUV design"></label>
+      </div>
+      <div class="row">
+        <button class="btn primary" id="saveDesignBtn">Save design as profile</button>
+        <button class="btn-link" id="resetDesignBtn">Reset to selected profile</button>
+      </div>
+      <div id="customVehicleList" class="cust-list"></div>
+    </div>
+
+    <div class="card design-box">
+      <h2>2 · Hull</h2>
+      <div id="box_hull"></div>
+    </div>
+
+    <div class="card design-box">
+      <h2>3 · Control surfaces</h2>
+      <p class="hint">Two pairs. Each pair's area S is the planform area of both fins together; span and chord follow from S and AR. Positions are measured from the nose to each pair's centre of lift.</p>
+      <h3>Front pair</h3>
+      <div id="box_front"></div>
+      <h3>Rear pair</h3>
+      <div id="box_rear"></div>
+      <label class="check"><input id="cruciform" type="checkbox"> Cruciform – the same pairs also act in the vertical plane (yaw)</label>
+    </div>
+
+    <div class="card design-box">
+      <h2>4 · Waterjet, fuel & mass</h2>
+      <div id="box_propulsion"></div>
+      <label class="field">Payload
+        <select id="payloadSelect" class="input"></select>
+      </label>
+      <label class="field">Payload mass
+        <input id="payloadWeight" class="input" type="range" min="0" max="50" step="0.1">
+        <span id="payloadWeightLabel" class="out"></span>
+      </label>
+    </div>
+
+    <div class="card">
+      <h2>5 · Environment & operation</h2>
+      <div id="box_environment"></div>
+      <label class="check"><input id="useVehicleResponse" type="checkbox"> Include vehicle response in gust drag & loads (off = fixed attitude, as in the MATLAB script)</label>
+      <label class="check"><input id="includeQPenalty" type="checkbox"> Include u/v/w dynamic-pressure drag penalty (the script ignores it)</label>
+    </div>
+
+    <div class="card">
+      <h2>6 · Turbulence (von Kármán)</h2>
+      <div class="placeholder-note" id="turbPlaceholder">⚠ These are still the <b>atmospheric</b> values from the MATLAB reference script. Replace with measured underwater values.</div>
+      <div id="box_turbulence" class="grid2"></div>
+      <div class="row"><button class="btn-link" id="resetTurbBtn">Reset to presets</button></div>
+    </div>
+
+    <div class="card">
+      <h2>7 · Empirical calibration</h2>
+      <p class="hint">Override theoretical coefficients with measured values. Tick "use" to activate.</p>
+      <table class="calib">
+        <thead><tr><th>Coefficient</th><th>Theory</th><th>Measured</th><th>Use</th></tr></thead>
+        <tbody>
+          <tr><td>Hull drag coeff. C<sub>D,wet</sub></td><td id="cc_hull">–</td><td><input id="cal_hull" class="input" type="number" step="0.0001" placeholder="e.g. 0.004"></td><td><input id="cal_hull_use" type="checkbox"></td></tr>
+          <tr><td>CLα front (1/rad)</td><td id="cc_claf">–</td><td><input id="cal_claf" class="input" type="number" step="0.05" placeholder="e.g. 2.8"></td><td><input id="cal_claf_use" type="checkbox"></td></tr>
+          <tr><td>CLα rear (1/rad)</td><td id="cc_clar">–</td><td><input id="cal_clar" class="input" type="number" step="0.05" placeholder="e.g. 2.8"></td><td><input id="cal_clar_use" type="checkbox"></td></tr>
+          <tr><td>η<sub>jet</sub></td><td id="cc_eta">–</td><td><input id="cal_eta" class="input" type="number" step="0.01" min="0" max="1" placeholder="e.g. 0.55"></td><td><input id="cal_eta_use" type="checkbox"></td></tr>
+          <tr><td>Extra drag area (m²)</td><td id="cc_extra">–</td><td><input id="cal_extra" class="input" type="number" step="0.0005" placeholder="e.g. 0.002"></td><td><input id="cal_extra_use" type="checkbox"></td></tr>
+        </tbody>
+      </table>
+      <h3 class="subh">Or derive hull C<sub>D,wet</sub> from a calm-water run</h3>
+      <div class="grid2">
+        <label class="field">Measured engine power (kW)<input id="cal_runP" class="input" type="number" step="0.1" placeholder="e.g. 6.5"></label>
+        <label class="field">Speed during run (m/s)<input id="cal_runV" class="input" type="number" step="0.1" placeholder="e.g. 8"></label>
+      </div>
+      <div class="row">
+        <label class="check"><input id="cal_run_use" type="checkbox"> use run measurement</label>
+        <button class="btn-link" id="cal_resetBtn">Reset calibration</button>
+      </div>
+      <p class="hint" id="cal_runInfo"></p>
+    </div>
+
+    <div class="card">
+      <h2>8 · Data & files</h2>
+      <div class="grid2">
+        <label class="field">Format
+          <select id="dlg_format" class="input">
+            <option value="json">JSON</option>
+            <option value="csv">CSV (semicolon)</option>
+            <option value="tsv">TSV (tab)</option>
+          </select>
+        </label>
+        <div class="row">
+          <button class="btn" id="btnDownloadTemplates">Download empty templates</button>
+          <button class="btn" id="btnExportAll">Export all (incl. custom)</button>
+        </div>
+      </div>
+      <label class="field">Import vehicles/payloads (multiple files)
+        <input id="fileInput" class="input" type="file" multiple accept=".json,.csv,.tsv,.txt">
+      </label>
+      <p class="hint">Vehicle columns: <code id="vehicleColumns"></code>. Payload columns: id, name, type, weightKg. CSV/TSV delimiter (tab, semicolon, comma) is detected automatically.</p>
+    </div>
+  </section>
+
+  <!-- ==================== RESULTS ==================== -->
+  <section class="col results" aria-label="Results">
+    <div class="card result-hero">
+      <div class="hero-row three">
+        <div class="hero-item">
+          <div class="hero-label">One-way range</div>
+          <div class="hero-value"><span id="rangeBig">–</span> km</div>
+          <div class="hero-sub" id="rangeSub">at chosen cruise speed</div>
+        </div>
+        <div class="hero-item">
+          <div class="hero-label">Endurance</div>
+          <div class="hero-value"><span id="endureBig">–</span></div>
+          <div class="hero-sub">until fuel reserve</div>
+        </div>
+        <div class="hero-item">
+          <div class="hero-label">Static margin</div>
+          <div class="hero-value"><span id="smBig">–</span> %</div>
+          <div class="hero-sub" id="smSub">of hull length</div>
+        </div>
+      </div>
+      <div class="row wrap">
+        <span class="chip" id="cf_stab">stability –</span>
+        <span class="chip" id="cf_feas">power –</span>
+        <span class="chip" id="cf_cla">CLα –</span>
+        <span class="chip" id="cf_hull">C<sub>D,wet</sub> –</span>
+        <span class="chip" id="cf_eta">η –</span>
+        <span class="chip" id="cf_mode">mode –</span>
+      </div>
+      <div class="row wrap cta">
+        <button class="btn primary" id="computeBtn">Compute & log</button>
+        <button class="btn" id="copySummaryBtn">Copy summary</button>
+        <button class="btn" id="downloadResultsBtn">Download results</button>
+      </div>
+      <div id="warningsBox" class="warnings hidden"></div>
+    </div>
+
+    <div class="card wide">
+      <h2>Side view – layout, CG and neutral point</h2>
+      <div id="sideView" class="sideview"></div>
+      <p class="hint">Fins are drawn at their centre-of-lift positions (span to scale). ● CG · ▲ neutral point (fins + hull Munk moment). Stable when ▲ is aft of ●.</p>
+    </div>
+
+    <div class="card">
+      <h2>Trajectory stability</h2>
+      <div class="kv"><span>Neutral point x<sub>NP</sub></span><b id="tsNP">–</b></div>
+      <div class="kv"><span>Static margin</span><b id="tsSM">–</b></div>
+      <div class="kv"><span>Pitch/heave mode</span><b id="tsPitch">–</b></div>
+      <div class="kv"><span>Yaw/sway mode</span><b id="tsYaw">–</b></div>
+      <div class="kv"><span>RMS gust incidence, front / rear</span><b id="tsAlpha">–</b></div>
+      <div class="kv"><span>RMS load factor (vertical)</span><b id="tsN">–</b></div>
+      <div class="kv"><span>RMS pitch rate</span><b id="tsQ">–</b></div>
+      <div class="kv"><span>RMS path-angle wander, vert. / lat.</span><b id="tsGamma">–</b></div>
+      <div class="kv"><span>Track wander after 1 km, depth / lateral</span><b id="tsD1">–</b></div>
+      <div class="kv"><span>Track wander at full range, depth / lateral</span><b id="tsDR">–</b></div>
+      <p class="hint">No steering assumed. Wander = RMS deviation from the mean straight course, from the turbulence spectrum through the rigid-body response.</p>
+    </div>
+
+    <div class="card">
+      <h2>Propulsion & drag</h2>
+      <div class="kv"><span>Total drag (mean)</span><b id="pdD">–</b></div>
+      <div class="kv"><span>Engine power required</span><b id="pdP">–</b></div>
+      <div class="kv"><span>Jet velocity · Froude efficiency</span><b id="pdJet">–</b></div>
+      <div class="kv"><span>Overall propulsive efficiency</span><b id="pdEta">–</b></div>
+      <div class="kv"><span>Fuel flow</span><b id="pdFuel">–</b></div>
+      <div class="kv"><span>Equivalent TSFC c (script units)</span><b id="pdC">–</b></div>
+      <div class="kv"><span>L/D (L = W, as script)</span><b id="pdLD">–</b></div>
+      <div class="kv"><span>Max speed (power-limited)</span><b id="pdVmax">–</b></div>
+      <div class="kv"><span>Best-range speed</span><b id="pdBest">–</b></div>
+      <div class="stats-grid" id="dragBreakdown"></div>
+    </div>
+
+    <div class="card map-card">
+      <div class="map-head">
+        <h2>Map – one-way reach</h2>
+        <button class="btn-link" id="resetStartBtn">Reset start point</button>
+      </div>
+      <div id="mapDiv" class="map"></div>
+      <div class="map-legend">
+        <span class="lg lg-out"><i></i>One-way reach (per heading, incl. wind placeholder)</span>
+        <span class="lg lg-start"><i></i>Start point (drag the marker)</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Range vs cruise speed</h2>
+      <div class="chart" id="chartSpeed"></div>
+    </div>
+    <div class="card">
+      <h2>Track wander vs distance</h2>
+      <div class="chart" id="chartDisp"></div>
+    </div>
+    <div class="card">
+      <h2>Static margin vs rear-pair position</h2>
+      <div class="chart" id="chartSM"></div>
+    </div>
+    <div class="card">
+      <h2>Gust spectrum – raw vs felt at rear pair</h2>
+      <div class="chart" id="chartSpec"></div>
+    </div>
+
+    <div class="card">
+      <h2>Scenarios (comparison)</h2>
+      <div class="row">
+        <button class="btn primary" id="addScenarioBtn">Save current as scenario</button>
+        <button class="btn-link" id="clearScenariosBtn">Clear</button>
+        <span class="hint" id="scenarioCount"></span>
+      </div>
+      <div id="scenarioList" class="scenario-list"></div>
+    </div>
+
+    <div class="card">
+      <h2>Session history</h2>
+      <div class="row">
+        <span class="hint" id="historyCount"></span>
+        <button class="btn-link" id="clearHistoryBtn">Clear</button>
+      </div>
+      <div id="historyList" class="hist-list"></div>
+    </div>
+
+    <details class="card wide">
+      <summary>Calculation steps</summary>
+      <div id="stepsBox" class="steps"></div>
+    </details>
+
+    <div class="card notes wide">
+      <h2>Model & assumptions</h2>
+      <ul class="notes-list">
+        <li>Static balance as in the MATLAB reference: lift = weight (m0·g), split between the pairs by moment balance about CG. Buoyancy is deliberately excluded (handled separately).</li>
+        <li>Gust drag penalty: E[CL²] = CL<sub>trim</sub>² + CLα²·σ<sub>α</sub>², with σ<sub>α</sub> from integrating the von Kármán spectrum in the frequency domain (fin-chord averaging, fore/aft delay, optional rigid-body response). Fixed-attitude mode reproduces the script.</li>
+        <li>Hull drag: ITTC-57 friction × Hoerner form factor on wetted area. Fin lift slope from AR (Helmbold) unless calibrated.</li>
+        <li>Waterjet momentum theory; η<sub>jet</sub> converts engine power to jet-stream power. Range by Breguet with fuel burn (BSFC); equivalent to the script's V/c·L/D·ln(m0/mf).</li>
+        <li>Trajectory: linear pitch/heave and yaw/sway with added mass (Lamb), hull Munk moment, Froude–Krylov force; no steering.</li>
+        <li>Quasi-steady; CG fixed during fuel burn; trim evaluated at m0. Full derivation: <code>docs/MODEL.md</code>. All coefficients live in <code>data/model.json</code>.</li>
+      </ul>
+    </div>
+  </section>
+
+</main>
+
+<div id="chartTip" class="chart-tip hidden" role="status"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="js/model.js"></script>
+<script src="js/data.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,7 @@
+[
+  { "id": "pl-none", "name": "No payload", "type": "none", "weightKg": 0 },
+  { "id": "pl-ctd", "name": "CTD / environment sensor", "type": "sensor", "weightKg": 1.0 },
+  { "id": "pl-camera", "name": "Camera + lights", "type": "sensor", "weightKg": 2.0 },
+  { "id": "pl-sss", "name": "Side-scan sonar module", "type": "sensor", "weightKg": 4.0 },
+  { "id": "pl-comms", "name": "Comms / relay buoy", "type": "system", "weightKg": 3.0 }
+]

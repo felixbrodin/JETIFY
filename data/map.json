@@ -1,0 +1,20 @@
+{
+  "center": {
+    "name": "Baltic Sea (south of Landsort)",
+    "lat": 58.55,
+    "lng": 18.1,
+    "zoom": 8
+  },
+  "layers": {
+    "map": {
+      "name": "Map",
+      "url": "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+      "attribution": "© OpenStreetMap"
+    },
+    "satellite": {
+      "name": "Satellite",
+      "url": "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+      "attribution": "© Esri"
+    }
+  }
+}
