@@ -3,7 +3,7 @@
 Quasi-steady mission-planning model for a waterjet-propelled, jet-fuel AUV.
 No time simulation: turbulence statistics are obtained by integrating the
 von Kármán spectrum in the frequency domain. Implementation: `js/model.js`.
-All coefficients and defaults: `data/model.json`.
+All coefficients and defaults: `data/model.json`; slider spans: `data/variables.json`.
 
 Origin: the MATLAB reference script "VON KARMAN TURBULENCE MODEL" (first-order
 shaping filter, 120 s Monte-Carlo, Breguet range). Jetify keeps its static

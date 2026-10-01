@@ -29,6 +29,19 @@ replaced with the model in [`docs/MODEL.md`](docs/MODEL.md).
 - Track wander (depth and lateral) vs distance with no steering
 - Side view, map reach, and charts: range vs speed, wander vs distance, static margin vs rear-fin position, gust spectrum
 
+## Adjusting slider spans
+
+Every adjustable variable (label, unit, slider min/max, step and decimals) is defined in
+**`data/variables.json`**. Edit the file and reload the page; no code changes are needed.
+The file starts with a short `_readme` explaining each field. Run the tests afterwards to
+catch typos and spans that exclude a default value.
+
+| File | Holds |
+|---|---|
+| `data/variables.json` | spans of all sliders and inputs (+ payload slider, speed-scan step) |
+| `data/model.json` | physics coefficients, environment and turbulence default values |
+| `data/vehicles.json` | vehicle profiles (default design values) |
+
 ## Run
 
 The page loads its data with `fetch`, so it needs a local web server:
@@ -60,8 +73,8 @@ for the operating area (e.g. the Baltic), then set `"placeholder": false`.
 index.html, styles.css
 js/model.js     physics engine (no DOM; also loadable in Node)
 js/data.js      profile loading, CSV/TSV/JSON import & export
-js/app.js       UI – input fields are generated from data/model.json "ui"
-data/           model.json (all coefficients), vehicles.*, payloads.*, map.json
+js/app.js       UI – input fields are generated from data/variables.json
+data/           variables.json (slider spans), model.json (coefficients), vehicles.*, payloads.*, map.json
 docs/MODEL.md   derivation and list of simplifications
 test/           node:test suite
 ```

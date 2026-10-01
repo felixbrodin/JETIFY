@@ -8,6 +8,8 @@ const Model = require("../js/model.js");
 const I = Model._internal;
 
 const model = JSON.parse(fs.readFileSync(path.join(__dirname, "../data/model.json"), "utf8"));
+const variables = JSON.parse(fs.readFileSync(path.join(__dirname, "../data/variables.json"), "utf8"));
+model.presets = Model.presetsFromVariables(variables);
 const vehicles = JSON.parse(fs.readFileSync(path.join(__dirname, "../data/vehicles.json"), "utf8"));
 const envOf = (over) => ({ ...model.environmentDefaults, payload_kg: 0, turbulence: { ...model.turbulence }, ...over });
 
@@ -82,4 +84,24 @@ test("zero turbulence → no gust drag, and penalty grows with σ_w", () => {
   assert.ok(calm.chosen.drag.gustV < 1e-9 && calm.chosen.drag.gustL < 1e-9);
   const base = Model.analyze(d, envOf({}), model, {});
   assert.ok(base.chosen.rangeKm < calm.chosen.rangeKm);
+});
+
+test("variables.json: every field is well formed and every slider span contains the defaults", () => {
+  const all = Object.values(variables.groups).flat();
+  const keys = new Set(all.map(d => d.key));
+  assert.strictEqual(keys.size, all.length, "duplicate key");
+  const envDefaults = { ...model.environmentDefaults };
+  all.forEach(d => {
+    assert.ok(d.key && d.label && ["slider", "number"].includes(d.kind), "bad entry " + JSON.stringify(d));
+    assert.ok(d.step > 0, d.key + ": step must be > 0");
+    if (d.kind !== "slider") return;
+    const max = typeof d.max === "string" ? null : d.max;
+    if (typeof d.max === "string") assert.ok(keys.has(d.max), d.key + ": max refers to unknown key " + d.max);
+    else assert.ok(d.min < max, d.key + ": min must be < max");
+    const values = [envDefaults[d.key], ...vehicles.map(v => v[d.key])].filter(v => v != null);
+    values.forEach(v => {
+      const hi = max != null ? max : Infinity;
+      assert.ok(v >= d.min && v <= hi, `${d.key}: default ${v} is outside the span ${d.min}–${d.max}`);
+    });
+  });
 });

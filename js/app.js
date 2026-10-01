@@ -3,7 +3,7 @@
 /*
  * Application logic – binds the UI, the physics engine (Model) and data (Data).
  * Nothing is hardcoded here: input fields, ranges and defaults are generated
- * from data/model.json ("ui" + "environmentDefaults" + "turbulence") and the
+ * from data/variables.json (fields + spans), data/model.json (defaults) and the
  * profiles in data/.
  */
 (() => {
@@ -46,10 +46,18 @@
     const res = await Data.loadDefaults();
     if (!res.ok) {
       show($("banner"));
-      $("bannerText").textContent = "The browser blocks fetch when the page is opened directly from disk (file://). Start the local server (start-server.bat, or `python -m http.server 8000`) and open http://localhost:8000.";
+      $("bannerText").textContent = "Could not load: " + res.missing.join(", ") + ". If you edited one of these files, check it is valid JSON (a missing comma or quote is the usual cause). If the page was opened directly from disk (file://), start the local server (start-server.bat) instead.";
       return;
     }
     state.model = res.model;
+    state.vars = res.variables;
+    try {
+      state.model.presets = Model.presetsFromVariables(state.vars);
+    } catch (e) {
+      show($("banner")); $("bannerText").textContent = e.message; return;
+    }
+    const pv = state.vars.payload || { min: 0, max: 50, step: 0.1 };
+    Object.assign($("payloadWeight"), { min: pv.min, max: pv.max, step: pv.step });
     state.defaultVehicles = res.vehicles;
     state.defaultPayloads = res.payloads;
     state.env = { ...res.model.environmentDefaults, turbulence: { ...res.model.turbulence } };
@@ -64,7 +72,7 @@
     schedule();
   }
 
-  // ---------- Field generation from model.json "ui" ----------
+  // ---------- Field generation from data/variables.json ----------
   // target: "design" | "env" | "turb"
   function fieldMax(def) {
     return typeof def.max === "string" ? state.design[def.max] : def.max;
@@ -72,8 +80,10 @@
   function renderFields(group, containerId, target) {
     const box = $(containerId);
     box.innerHTML = "";
-    (state.model.ui[group] || []).forEach(def => {
+    (state.vars.groups[group] || []).forEach(def => {
       const obj = target === "design" ? state.design : target === "turb" ? state.env.turbulence : state.env;
+      // Keep the computed value equal to what the slider shows when a span is narrowed.
+      if (def.kind === "slider" && obj[def.key] != null) obj[def.key] = clamp(obj[def.key], def.min, fieldMax(def));
       const id = "f_" + def.key;
       const lab = document.createElement("label");
       lab.className = "field";
@@ -124,7 +134,7 @@
 
   // Position sliders (CG, fins) are bounded by the hull length.
   function syncPositionLimits() {
-    ["hull", "front", "rear"].forEach(g => (state.model.ui[g] || []).forEach(def => {
+    ["hull", "front", "rear"].forEach(g => (state.vars.groups[g] || []).forEach(def => {
       if (typeof def.max !== "string") return;
       const el = $("f_" + def.key);
       if (!el) return;

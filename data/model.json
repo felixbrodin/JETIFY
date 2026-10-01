@@ -16,8 +16,8 @@
     "L_w": 50
   },
   "spectral": {
-    "omegaMin_radpm": 1e-5,
-    "omegaMax_radpm": 1e3,
+    "omegaMin_radpm": 0.00001,
+    "omegaMax_radpm": 1000,
     "points": 600,
     "dispersionPoints": 20,
     "dispersionMaxKm": 500
@@ -29,66 +29,13 @@
     "density_kgpm3": 1005,
     "cruiseSpeed_mps": 10,
     "reserveFraction": 0.1,
-    "kinematicViscosity_m2ps": 1.3e-6,
+    "kinematicViscosity_m2ps": 0.0000013,
     "oswaldE": 0.8,
     "finCD0": 0.01,
-    "finCLmax": 1.0,
+    "finCLmax": 1,
     "windSpeed_mps": 0,
     "windFromDeg": 0,
     "includeQPenalty": false,
     "useVehicleResponse": true
-  },
-  "presets": {
-    "speedScanMin_mps": 0.5,
-    "speedScanMax_mps": 30,
-    "speedScanStep_mps": 0.25
-  },
-  "ui": {
-    "hull": [
-      { "key": "hullLength_m", "label": "Hull length L", "unit": "m", "kind": "slider", "min": 0.5, "max": 8, "step": 0.05, "digits": 2 },
-      { "key": "hullDiameter_m", "label": "Hull diameter D", "unit": "m", "kind": "slider", "min": 0.05, "max": 1.2, "step": 0.005, "digits": 3 },
-      { "key": "xcg_m", "label": "Centre of gravity x_CG (from nose)", "unit": "m", "kind": "slider", "min": 0, "max": "hullLength_m", "step": 0.01, "digits": 2 },
-      { "key": "volumeCoeff", "label": "Volume coefficient (Vol / cylinder)", "unit": "", "kind": "number", "step": 0.01, "digits": 2 },
-      { "key": "wettedCoeff", "label": "Wetted-area coefficient (S_wet / πDL)", "unit": "", "kind": "number", "step": 0.01, "digits": 2 },
-      { "key": "pitchInertia_kgm2", "label": "Pitch inertia I_yy (blank = estimate)", "unit": "kg·m²", "kind": "number", "step": 0.1, "digits": 2, "nullable": true },
-      { "key": "extraPitchDamping_Nms", "label": "Extra pitch damping (hull)", "unit": "N·m·s", "kind": "number", "step": 1, "digits": 1 }
-    ],
-    "front": [
-      { "key": "frontArea_m2", "label": "Area S_front (pair)", "unit": "m²", "kind": "slider", "min": 0.002, "max": 0.5, "step": 0.001, "digits": 3 },
-      { "key": "frontAR", "label": "Aspect ratio AR_front", "unit": "", "kind": "slider", "min": 0.5, "max": 8, "step": 0.05, "digits": 2 },
-      { "key": "frontX_m", "label": "Centre of lift x_front (from nose)", "unit": "m", "kind": "slider", "min": 0, "max": "hullLength_m", "step": 0.01, "digits": 2 }
-    ],
-    "rear": [
-      { "key": "rearArea_m2", "label": "Area S_rear (pair)", "unit": "m²", "kind": "slider", "min": 0.002, "max": 0.5, "step": 0.001, "digits": 3 },
-      { "key": "rearAR", "label": "Aspect ratio AR_rear", "unit": "", "kind": "slider", "min": 0.5, "max": 8, "step": 0.05, "digits": 2 },
-      { "key": "rearX_m", "label": "Centre of lift x_rear (from nose)", "unit": "m", "kind": "slider", "min": 0, "max": "hullLength_m", "step": 0.01, "digits": 2 }
-    ],
-    "propulsion": [
-      { "key": "maxPower_kW", "label": "Max engine power", "unit": "kW", "kind": "slider", "min": 0.5, "max": 150, "step": 0.5, "digits": 1 },
-      { "key": "jetEfficiency", "label": "η_jet (engine → jet-stream power)", "unit": "", "kind": "number", "step": 0.01, "digits": 2 },
-      { "key": "nozzleDiameter_m", "label": "Nozzle diameter", "unit": "m", "kind": "number", "step": 0.005, "digits": 3 },
-      { "key": "bsfc_kgpkWh", "label": "BSFC (fuel per engine kWh)", "unit": "kg/kWh", "kind": "number", "step": 0.01, "digits": 2 },
-      { "key": "emptyMass_kg", "label": "Empty mass (no fuel, no payload)", "unit": "kg", "kind": "number", "step": 0.5, "digits": 1 },
-      { "key": "fuelMass_kg", "label": "Fuel mass", "unit": "kg", "kind": "number", "step": 0.5, "digits": 1 }
-    ],
-    "environment": [
-      { "key": "density_kgpm3", "label": "Water density ρ", "unit": "kg/m³", "kind": "slider", "min": 990, "max": 1030, "step": 0.5, "digits": 1 },
-      { "key": "cruiseSpeed_mps", "label": "Cruise speed V0 (through water)", "unit": "m/s", "kind": "slider", "min": 0.5, "max": 30, "step": 0.25, "digits": 2 },
-      { "key": "reserveFraction", "label": "Fuel reserve", "unit": "%", "kind": "slider", "min": 0, "max": 0.5, "step": 0.01, "digits": 0, "percent": true },
-      { "key": "windSpeed_mps", "label": "Wind (kept from original – placeholder)", "unit": "m/s", "kind": "slider", "min": 0, "max": 15, "step": 0.5, "digits": 1 },
-      { "key": "windFromDeg", "label": "Wind from", "unit": "°", "kind": "slider", "min": 0, "max": 359, "step": 1, "digits": 0 },
-      { "key": "kinematicViscosity_m2ps", "label": "Kinematic viscosity ν", "unit": "m²/s", "kind": "number", "step": 1e-8, "digits": 8 },
-      { "key": "oswaldE", "label": "Oswald efficiency e", "unit": "", "kind": "number", "step": 0.01, "digits": 2 },
-      { "key": "finCD0", "label": "Fin profile drag CD0 (per planform area)", "unit": "", "kind": "number", "step": 0.001, "digits": 4 },
-      { "key": "finCLmax", "label": "Fin CLmax (stall check)", "unit": "", "kind": "number", "step": 0.05, "digits": 2 }
-    ],
-    "turbulence": [
-      { "key": "sigma_u", "label": "σ_u longitudinal RMS", "unit": "m/s", "kind": "number", "step": 0.01, "digits": 3 },
-      { "key": "sigma_v", "label": "σ_v lateral RMS", "unit": "m/s", "kind": "number", "step": 0.01, "digits": 3 },
-      { "key": "sigma_w", "label": "σ_w vertical RMS", "unit": "m/s", "kind": "number", "step": 0.01, "digits": 3 },
-      { "key": "L_u", "label": "L_u length scale", "unit": "m", "kind": "number", "step": 1, "digits": 1 },
-      { "key": "L_v", "label": "L_v length scale", "unit": "m", "kind": "number", "step": 1, "digits": 1 },
-      { "key": "L_w", "label": "L_w length scale", "unit": "m", "kind": "number", "step": 1, "digits": 1 }
-    ]
   }
 }

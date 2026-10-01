@@ -21,10 +21,11 @@ const Data = (() => {
       }
     };
     const model = await read("data/model.json");
+    const variables = await read("data/variables.json");
     const vehicles = await read("data/vehicles.json");
     const payloads = await read("data/payloads.json");
-    const ok = !!model && !!vehicles && !!payloads;
-    return { ok, model, vehicles: vehicles || [], payloads: payloads || [] };
+    const missing = [["model.json", model], ["variables.json", variables], ["vehicles.json", vehicles], ["payloads.json", payloads]].filter(([, v]) => !v).map(([n]) => n);
+    return { ok: !missing.length, missing, model, variables, vehicles: vehicles || [], payloads: payloads || [] };
   }
 
   // ---------- CSV/TSV parsing (delimiter auto-detected) ----------

@@ -499,8 +499,16 @@ const Model = (() => {
     return { headings, oneWayKm, min: pos.length ? Math.min(...pos) : 0, max: pos.length ? Math.max(...pos) : 0 };
   }
 
+  // Speed-scan range = the cruise-speed slider span in data/variables.json.
+  function presetsFromVariables(vars) {
+    const all = Object.values(vars.groups).flat();
+    const v = all.find(d => d.key === "cruiseSpeed_mps");
+    if (!v) throw new Error("variables.json: cruiseSpeed_mps is missing");
+    return { speedScanMin_mps: v.min, speedScanMax_mps: v.max, speedScanStep_mps: (vars.speedScan && vars.speedScan.step_mps) || v.step };
+  }
+
   return {
-    analyze, envelope, round,
+    analyze, envelope, round, presetsFromVariables,
     // exposed for tests / docs
     _internal: { phiLongitudinal, phiTransverse, logGrid, lambCoefficients, helmbold, jetForThrust, thrustForJetPower, ittcCf, hullGeometry, planeSystem, planeStats }
   };
