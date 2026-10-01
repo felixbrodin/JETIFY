@@ -145,7 +145,7 @@
         "unit": "kW",
         "kind": "slider",
         "min": 0.5,
-        "max": 150,
+        "max": 1500,
         "step": 0.5,
         "digits": 1
       },
@@ -193,12 +193,12 @@
     "environment": [
       {
         "key": "density_kgpm3",
-        "label": "Water density ρ",
+        "label": "density ρ",
         "unit": "kg/m³",
         "kind": "slider",
-        "min": 990,
-        "max": 1030,
-        "step": 0.5,
+        "min": 0,
+        "max": 2,
+        "step": 0.01,
         "digits": 1
       },
       {
@@ -207,8 +207,8 @@
         "unit": "m/s",
         "kind": "slider",
         "min": 0.5,
-        "max": 30,
-        "step": 0.25,
+        "max": 300,
+        "step": 0.5,
         "digits": 2
       },
       {
@@ -228,7 +228,7 @@
         "unit": "m/s",
         "kind": "slider",
         "min": 0,
-        "max": 15,
+        "max": 40,
         "step": 0.5,
         "digits": 1
       },
