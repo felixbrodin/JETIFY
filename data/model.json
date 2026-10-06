@@ -59,7 +59,7 @@
   },
   "environmentDefaults": {
     "density_kgpm3": 1.225,
-    "cruiseSpeed_mps": 10,
+    "cruiseSpeed_mps": 100,
     "reserveFraction": 0.1,
     "kinematicViscosity_m2ps": 0.0000146,
     "oswaldE": 0.8,
