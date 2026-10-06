@@ -49,12 +49,13 @@
 
     <div class="card design-box">
       <h2>3 · Control surfaces</h2>
-      <p class="hint">Two pairs. Each pair's area S is the planform area of both fins together; span and chord follow from S and AR. Positions are measured from the nose to each pair's centre of lift.</p>
+      <p class="hint">Two pairs (e.g. wing + tail, or front + rear fins). Each pair's area S is the planform area of both halves together; span, root/tip chord and MAC follow from S, AR, taper and sweep. Positions are measured from the nose to each pair's root leading edge (apex); the aerodynamic centre is computed.</p>
       <h3>Front pair</h3>
       <div id="box_front"></div>
       <h3>Rear pair</h3>
       <div id="box_rear"></div>
       <label class="check"><input id="cruciform" type="checkbox"> Cruciform – the same pairs also act in the vertical plane (yaw)</label>
+      <label class="check"><input id="downwash" type="checkbox"> Downwash from the front pair on the rear pair (DATCOM dε/dα, wake lag l_H/V)</label>
     </div>
 
     <div class="card design-box">
@@ -169,7 +170,7 @@
     <div class="card wide">
       <h2>Side view – layout, CG and neutral point</h2>
       <div id="sideView" class="sideview"></div>
-      <p class="hint">Fins are drawn at their centre-of-lift positions (span to scale). ● CG · ▲ neutral point (fins + hull Munk moment). Stable when ▲ is aft of ●.</p>
+      <p class="hint">Pairs are drawn as their true planform (root chord at the hull, to scale); labels give the ¼-MAC aerodynamic centre. ● CG · ▲ neutral point (fins + hull Munk moment + downwash). Stable when ▲ is aft of ●.</p>
     </div>
 
     <div class="card">
@@ -259,7 +260,7 @@
       <ul class="notes-list">
         <li>Static balance as in the MATLAB reference: lift = weight (m0·g), split between the pairs by moment balance about CG. Buoyancy is deliberately excluded (handled separately).</li>
         <li>Gust drag penalty: E[CL²] = CL<sub>trim</sub>² + CLα²·σ<sub>α</sub>², with σ<sub>α</sub> from integrating the von Kármán spectrum in the frequency domain (fin-chord averaging, fore/aft delay, optional rigid-body response). Fixed-attitude mode reproduces the script.</li>
-        <li>Hull drag: ITTC-57 friction × Hoerner form factor on wetted area. Fin lift slope from AR and the selected 2D section (generalised Helmbold) unless calibrated; section CD0/CLmax from data/sections.json at the fin chord Re.</li>
+        <li>Hull drag: ITTC-57 friction × Hoerner form factor on wetted area. Fin lift slope from AR, sweep and the selected 2D section (DATCOM) unless calibrated; section CD0/CLmax from data/sections.json at the MAC Reynolds number. Delta planforms: Polhamus vortex lift. Front-pair downwash on the rear pair (DATCOM).</li>
         <li>Waterjet momentum theory; η<sub>jet</sub> converts engine power to jet-stream power. Range by Breguet with fuel burn (BSFC); equivalent to the script's V/c·L/D·ln(m0/mf).</li>
         <li>Trajectory: linear pitch/heave and yaw/sway with added mass (Lamb), hull Munk moment, Froude–Krylov force; no steering.</li>
         <li>Quasi-steady; CG fixed during fuel burn; trim evaluated at m0. Full derivation: <code>docs/MODEL.md</code>. All coefficients live in <code>data/model.json</code>.</li>

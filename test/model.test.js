@@ -73,8 +73,8 @@ test("baseline vehicle produces a finite, stable result", () => {
 
 test("moving the rear pair aft increases the static margin", () => {
   const d = vehicles[0];
-  const a = Model.analyze({ ...d, rearX_m: 1.4 }, envOf({}), model, {});
-  const b = Model.analyze({ ...d, rearX_m: 1.7 }, envOf({}), model, {});
+  const a = Model.analyze({ ...d, rearXle_m: 1.4 }, envOf({}), model, {});
+  const b = Model.analyze({ ...d, rearXle_m: 1.7 }, envOf({}), model, {});
   assert.ok(b.staticMargin_m > a.staticMargin_m);
 });
 
@@ -136,4 +136,61 @@ test("sections.json is valid and the ideal section reproduces the old model", ()
   const n12 = Model.analyze({ ...v, frontSection: "naca0012", rearSection: "naca0012" }, env, { ...model, sections });
   assert.ok(n12.ctx.rear.clAlpha < old.ctx.rear.clAlpha, "real section has a lower slope than 2π");
   assert.notStrictEqual(n12.ctx.rear.cd0, env.finCD0);
+});
+
+test("planform: rectangle and straight-TE delta geometry", () => {
+  const r = I.planform(0.2, 4, 1, 0, 1);
+  const c = Math.sqrt(0.2 / 4);
+  assert.ok(Math.abs(r.mac - c) < 1e-12 && Math.abs(r.xAc25 - (1 + c / 4)) < 1e-12);
+  // Delta, λ = 0, tanΛ_LE = 4/AR (straight trailing edge): MAC = ⅔c_r, ¼-MAC at ½c_r, centroid at ⅔c_r.
+  const AR = 2.3, d = I.planform(0.3, AR, 0, Math.atan(4 / AR) * 180 / Math.PI, 0);
+  assert.ok(Math.abs(d.mac - 2 / 3 * d.cr) < 1e-12);
+  assert.ok(Math.abs(d.xAc25 - d.cr / 2) < 1e-9, "a.c. " + d.xAc25 / d.cr);
+  assert.ok(Math.abs(d.xCentroid - 2 / 3 * d.cr) < 1e-9);
+  assert.ok(Math.abs(d.tanHc - (4 / AR - 2 / AR)) < 1e-12);
+});
+
+test("legacy centre-of-lift x converts without changing the result", () => {
+  const v = vehicles[0], env = envOf({});
+  const pf = (n) => I.planform(v[n + "Area_m2"], v[n + "AR"], v[n + "Taper"], v[n + "SweepLE_deg"], v[n + "Xle_m"]);
+  const legacy = { ...v, frontX_m: pf("front").xAc25, rearX_m: pf("rear").xAc25 };
+  delete legacy.frontXle_m; delete legacy.rearXle_m;
+  const a = Model.analyze(v, env, model), b = Model.analyze(legacy, env, model);
+  assert.ok(Math.abs(a.chosen.rangeKm / b.chosen.rangeKm - 1) < 1e-9);
+  assert.ok(Math.abs(a.staticMargin_m - b.staticMargin_m) < 1e-9);
+});
+
+test("sweep lowers the DATCOM lift slope", () => {
+  assert.ok(I.helmbold(6, 2 * Math.PI, Math.tan(30 / 57.2958)) < I.helmbold(6, 2 * Math.PI, 0));
+});
+
+test("delta (Polhamus): small-α slope = Kp, vortex lift adds slope, CDi = CL·tanα", () => {
+  const pair = { kind: "delta", clAlpha: 2.4, Kv: Math.PI, stallAlpha: 25 / 57.2958, pf: I.planform(0.3, 2.3, 0, 60, 0) };
+  const s0 = I.liftState(pair, 1e-6);
+  assert.ok(Math.abs(s0.slope / 2.4 - 1) < 1e-3, "slope at 0: " + s0.slope);
+  const s = I.liftState(pair, 0.4);
+  assert.ok(Math.abs(I.deltaCL(pair, s.alpha) - 0.4) < 1e-9);
+  assert.ok(s.slope > 2.4, "vortex lift should raise the slope");
+  assert.ok(Math.abs(s.CDi - 0.4 * Math.tan(s.alpha)) < 1e-12);
+  assert.ok(s.xAc > pair.pf.xAc25 && s.xAc < pair.pf.xCentroid, "a.c. moves aft towards the centroid");
+});
+
+test("downwash: plausible gradient for a conventional wing + tail, and it lowers the static margin", () => {
+  const ctx = { downwash: true, tailHeight: 0, front: { AR: 7, clAlpha: 4.8, pf: I.planform(0.5, 7, 0.5, 0, 0) } };
+  const b = ctx.front.pf.b;
+  const E = I.downwashGradient(ctx, { xAc: 0, slope: 4.8 }, { xAc: 0.5 * b }).E;
+  assert.ok(E > 0.25 && E < 0.6, "dε/dα " + E);
+  const v = vehicles[0], env = envOf({});
+  const on = Model.analyze({ ...v, downwash: true }, env, model), off = Model.analyze({ ...v, downwash: false }, env, model);
+  assert.ok(on.chosen.trim.dw.E > 0);
+  assert.ok(on.staticMargin_m < off.staticMargin_m);
+});
+
+test("delta wing + aft tail produces a finite result", () => {
+  const v = { ...vehicles[0], hullLength_m: 1.2, hullDiameter_m: 0.09, xcg_m: 0.62, emptyMass_kg: 1.8, fuelMass_kg: 0.2,
+    frontArea_m2: 0.3, frontAR: 2.3, frontTaper: 0, frontSweepLE_deg: 60, frontXle_m: 0.15, frontPlanform: "delta",
+    rearArea_m2: 0.06, rearAR: 4, rearTaper: 0.6, rearSweepLE_deg: 20, rearXle_m: 1.05, rearHeight_m: 0.05, cruciform: false };
+  const r = Model.analyze(v, envOf({ cruiseSpeed_mps: 20 }), model);
+  assert.ok(r && Number.isFinite(r.staticMargin_m) && Number.isFinite(r.chosen.drag.total));
+  assert.strictEqual(r.ctx.front.kind, "delta");
 });

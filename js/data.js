@@ -80,11 +80,13 @@ const Data = (() => {
   // Numeric vehicle fields (flat so that CSV/TSV round-trips cleanly).
   const vehicleNumeric = [
     "hullLength_m", "hullDiameter_m", "xcg_m", "volumeCoeff", "wettedCoeff", "pitchInertia_kgm2", "extraPitchDamping_Nms",
-    "frontArea_m2", "frontAR", "frontX_m", "rearArea_m2", "rearAR", "rearX_m",
+    "frontArea_m2", "frontAR", "frontXle_m", "frontSweepLE_deg", "frontTaper", "frontOswaldE",
+    "rearArea_m2", "rearAR", "rearXle_m", "rearSweepLE_deg", "rearTaper", "rearOswaldE", "rearHeight_m",
     "maxPower_kW", "jetEfficiency", "nozzleDiameter_m", "bsfc_kgpkWh", "emptyMass_kg", "fuelMass_kg"
   ];
-  const vehicleText = ["frontSection", "rearSection"];   // section ids from data/sections.json (blank = default)
-  const vehicleHeaders = ["id", "name", "type", ...vehicleNumeric, ...vehicleText, "cruciform"];
+  // Section ids from data/sections.json; planform "conventional" | "delta" (blank = default).
+  const vehicleText = ["frontSection", "rearSection", "frontPlanform", "rearPlanform"];
+  const vehicleHeaders = ["id", "name", "type", ...vehicleNumeric, ...vehicleText, "cruciform", "downwash"];
   const vehicleRequired = ["hullLength_m", "hullDiameter_m", "frontArea_m2", "rearArea_m2"];
   const payloadHeaders = ["id", "name", "type", "weightKg"];
 
@@ -93,8 +95,11 @@ const Data = (() => {
       id: String(row.id || "").trim() || "custom-" + Math.random().toString(36).slice(2, 8),
       name: String(row.name || "").trim() || "Unnamed vehicle",
       type: String(row.type || "").trim() || "custom",
-      cruciform: row.cruciform == null || row.cruciform === "" ? true : bool(row.cruciform)
+      cruciform: row.cruciform == null || row.cruciform === "" ? true : bool(row.cruciform),
+      downwash: row.downwash == null || row.downwash === "" ? true : bool(row.downwash)
     };
+    // Older files gave frontX_m / rearX_m (centre of lift); Model.normalizeDesign converts them.
+    ["frontX_m", "rearX_m"].forEach(k => { if (num(row[k]) != null) v[k] = num(row[k]); });
     vehicleNumeric.forEach(k => { v[k] = num(row[k]); });
     vehicleText.forEach(k => { const t = String(row[k] == null ? "" : row[k]).trim(); if (t) v[k] = t; });
     if (v.extraPitchDamping_Nms == null) v.extraPitchDamping_Nms = 0;

@@ -149,37 +149,56 @@
   function renderDesignBoxes() {
     renderFields("hull", "box_hull", "design");
     renderFields("front", "box_front", "design");
+    renderPlanformSelect("frontPlanform", "box_front");
     renderSectionSelect("frontSection", "box_front");
     renderFields("rear", "box_rear", "design");
+    renderPlanformSelect("rearPlanform", "box_rear");
     renderSectionSelect("rearSection", "box_rear");
+    $("downwash").checked = state.design.downwash !== false;
     renderFields("propulsion", "box_propulsion", "design");
     $("cruciform").checked = !!state.design.cruciform;
   }
-  // 2D section (airfoil) picker – options come from data/sections.json.
-  function renderSectionSelect(key, containerId) {
-    const sc = state.model.sections;
-    const list = (sc && sc.sections) || [];
+  // Drop-down bound to state.design[key]. list: [{id, name, hint?}].
+  function renderSelect(key, containerId, label, list, fallback) {
     if (!list.length) return;
     const lab = document.createElement("label");
     lab.className = "field"; lab.htmlFor = "f_" + key;
     const title = document.createElement("span");
-    title.textContent = "2D section (airfoil)";
+    title.textContent = label;
     const sel = document.createElement("select");
     sel.id = "f_" + key; sel.className = "input";
     list.forEach(x => {
       const o = document.createElement("option");
-      o.value = x.id; o.textContent = x.name + (x.confidence === "rough" ? " – rough data" : "");
+      o.value = x.id; o.textContent = x.name;
       sel.appendChild(o);
     });
-    if (!list.some(x => x.id === state.design[key])) state.design[key] = sc.default || list[0].id;
+    if (!list.some(x => x.id === state.design[key])) state.design[key] = fallback || list[0].id;
     sel.value = state.design[key];
     const info = document.createElement("span");
     info.className = "hint"; info.id = "f_" + key + "_info";
-    const describe = () => { const x = list.find(y => y.id === sel.value); info.textContent = x ? (x.note ? x.note + " " : "") + "Source: " + x.source : ""; };
+    const describe = () => { const x = list.find(y => y.id === sel.value); info.textContent = x && x.hint ? x.hint : ""; };
     describe();
     sel.addEventListener("change", () => { state.design[key] = sel.value; describe(); schedule(); });
     lab.appendChild(title); lab.appendChild(sel); lab.appendChild(info);
     $(containerId).appendChild(lab);
+  }
+
+  // 2D section (airfoil) – options from data/sections.json.
+  function renderSectionSelect(key, containerId) {
+    const sc = state.model.sections;
+    const list = ((sc && sc.sections) || []).map(x => ({
+      id: x.id, name: x.name + (x.confidence === "rough" ? " – rough data" : ""),
+      hint: (x.note ? x.note + " " : "") + "Source: " + x.source
+    }));
+    renderSelect(key, containerId, "2D section (airfoil)", list, sc && sc.default);
+  }
+
+  const PLANFORMS = [
+    { id: "conventional", name: "Conventional – attached flow (DATCOM)", hint: "Linear lift CLα (DATCOM, incl. sweep), induced drag CL²/(π·e·AR), a.c. at ¼ MAC." },
+    { id: "delta", name: "Delta – sharp LE, vortex lift (Polhamus)", hint: "CL = Kp·sinα·cos²α + Kv·cosα·sin²α; no leading-edge suction (CDi = CL·tanα); vortex lift at the planform centroid. Kv and stall α in data/model.json." }
+  ];
+  function renderPlanformSelect(key, containerId) {
+    renderSelect(key, containerId, "Planform model", PLANFORMS, "conventional");
   }
 
   function renderEnvBoxes() {
@@ -209,7 +228,7 @@
   function loadProfile(p) {
     if (!p) return;
     state.activeVehicleId = p.id;
-    state.design = JSON.parse(JSON.stringify(p));
+    state.design = Model.normalizeDesign(JSON.parse(JSON.stringify(p)), state.model);
     renderDesignBoxes();
     renderCustomLists();
     fillCalibTheory();
@@ -277,9 +296,9 @@
 
   function fillCalibTheory() {
     if (!state.design) return;
-    // Theory = Helmbold with the selected section's cℓα (ignoring any active override).
+    // Theory = DATCOM slope with the selected section's cℓα and the pair's sweep (ignoring any active override).
     const r = state.last, I = Model._internal;
-    const theory = (n) => r ? I.helmbold(state.design[n + "AR"], r.ctx[n].section.a0) : I.helmbold(state.design[n + "AR"]);
+    const theory = (n) => r ? I.helmbold(r.ctx[n].AR, r.ctx[n].section.a0, r.ctx[n].pf.tanHc) : I.helmbold(state.design[n + "AR"]);
     $("cc_claf").textContent = fmt(theory("front"), 2);
     $("cc_clar").textContent = fmt(theory("rear"), 2);
     $("cc_eta").textContent = fmt(state.design.jetEfficiency, 2);
@@ -395,15 +414,16 @@
     // Nozzle
     const nz = Math.max(2, d.nozzleDiameter_m * s / 2);
     svg += `<rect class="sv-nozzle" x="${xt}" y="${yc - nz}" width="${Math.max(4, 0.04 * s)}" height="${2 * nz}"/>`;
-    // Fins: leading edge at x_cl − c/4, semispan b/2 above and below the hull
+    // Pairs: true trapezoidal planform (root chord at the hull, tip offset by b/2·tanΛ_LE), semispan above and below.
     const fin = (p, cls, label) => {
-      const le = X(p.xcl - p.chord / 4), te = X(p.xcl + 0.75 * p.chord), semi = p.span / 2 * s, sweep = 0.3 * p.chord * s;
+      const f = p.pf, semi = p.span / 2 * s;
+      const rootLE = X(f.xle), rootTE = X(f.xle + f.cr), tipLE = X(f.xle + p.span / 2 * f.tanLE), tipTE = X(f.xle + p.span / 2 * f.tanLE + f.ct);
       let out = "";
       [-1, 1].forEach(dir => {
         const yr = yc + dir * hr, yt = yr + dir * semi;
-        out += `<path class="${cls}" d="M ${le} ${yr} L ${le + sweep} ${yt} L ${te} ${yt} L ${te} ${yr} Z"/>`;
+        out += `<path class="${cls}" d="M ${rootLE} ${yr} L ${tipLE} ${yt} L ${tipTE} ${yt} L ${rootTE} ${yr} Z"/>`;
       });
-      out += `<text class="sv-label" x="${X(p.xcl)}" y="${yc - hr - semi - 6}" text-anchor="middle">${label} ${fmt(p.xcl, 2)} m</text>`;
+      out += `<text class="sv-label" x="${X(f.xAc25)}" y="${yc - hr - semi - 6}" text-anchor="middle">${label} a.c. ${fmt(f.xAc25, 2)} m</text>`;
       return out;
     };
     svg += fin(ctx.front, "sv-fin sv-fin-front", "front");
@@ -552,8 +572,8 @@
     makeChart($("chartSM"), {
       title: "Static margin vs rear-pair position",
       series: [{ name: "Static margin (% of L)", cls: "s1", data: r.smSweep.map(p => ({ x: p.x, y: p.sm })) }],
-      xLabel: "Rear pair x (m from nose)", yLabel: "Static margin (% L)",
-      markers: [{ x: state.design.rearX_m, label: "current " + fmt(state.design.rearX_m, 2) + " m" }],
+      xLabel: "Rear pair root LE x (m from nose)", yLabel: "Static margin (% L)",
+      markers: [{ x: r.ctx.rear.pf.xle, label: "current " + fmt(r.ctx.rear.pf.xle, 2) + " m" }],
       hlines: [0], zeroBase: false,
       fmtY: (y) => fmt(y, 1) + " %"
     });
@@ -666,8 +686,8 @@
       "────────────────────────────",
       "Design: " + d.name,
       "Hull: L " + fmt(d.hullLength_m, 2) + " m, D " + fmt(d.hullDiameter_m, 3) + " m, CG " + fmt(d.xcg_m, 2) + " m from nose",
-      "Front pair: S " + fmt(d.frontArea_m2, 3) + " m², AR " + fmt(d.frontAR, 2) + ", x " + fmt(d.frontX_m, 2) + " m",
-      "Rear pair:  S " + fmt(d.rearArea_m2, 3) + " m², AR " + fmt(d.rearAR, 2) + ", x " + fmt(d.rearX_m, 2) + " m" + (d.cruciform ? " (cruciform)" : ""),
+      "Front pair: S " + fmt(d.frontArea_m2, 3) + " m², AR " + fmt(d.frontAR, 2) + ", Λ " + fmt(d.frontSweepLE_deg, 0) + "°, λ " + fmt(d.frontTaper, 2) + ", apex x " + fmt(d.frontXle_m, 2) + " m" + (d.frontPlanform === "delta" ? " (delta)" : ""),
+      "Rear pair:  S " + fmt(d.rearArea_m2, 3) + " m², AR " + fmt(d.rearAR, 2) + ", Λ " + fmt(d.rearSweepLE_deg, 0) + "°, λ " + fmt(d.rearTaper, 2) + ", apex x " + fmt(d.rearXle_m, 2) + " m" + (d.rearPlanform === "delta" ? " (delta)" : "") + (d.cruciform ? " (cruciform)" : "") + (d.downwash === false ? " · downwash off" : ""),
       "Waterjet: " + fmt(d.maxPower_kW, 1) + " kW max, η_jet " + fmt(r.ctx.etaJet, 2) + ", nozzle " + fmt(d.nozzleDiameter_m * 1000, 0) + " mm, BSFC " + fmt(d.bsfc_kgpkWh, 2) + " kg/kWh",
       "Mass: m0 " + fmt(r.ctx.m0, 1) + " kg (fuel " + fmt(d.fuelMass_kg, 1) + " kg, payload " + fmt(state.payloadKg, 1) + " kg), reserve " + fmt(e.reserveFraction * 100, 0) + " %",
       "Water density " + fmt(e.density_kgpm3, 1) + " kg/m³ · cruise " + fmt(c.V, 2) + " m/s",
@@ -725,7 +745,7 @@
   function downloadTemplates() {
     const f = $("dlg_format").value || "json", delim = f === "tsv" ? "\t" : ";", ext = f === "tsv" ? "tsv" : "csv";
     if (f === "json") {
-      const blank = {}; Data.vehicleHeaders.forEach(h => blank[h] = h === "cruciform" ? true : (["id", "name", "type"].includes(h) ? "" : 0));
+      const blank = {}; Data.vehicleHeaders.forEach(h => blank[h] = ["cruciform", "downwash"].includes(h) ? true : (["id", "name", "type", "frontSection", "rearSection", "frontPlanform", "rearPlanform"].includes(h) ? "" : 0));
       Data.download("template-vehicles.json", JSON.stringify([blank], null, 2), "application/json");
       Data.download("template-payloads.json", JSON.stringify([{ id: "", name: "", type: "", weightKg: 0 }], null, 2), "application/json");
     } else {
@@ -756,6 +776,7 @@
       flash("Saved: " + name);
     });
     on("cruciform", "change", () => { state.design.cruciform = $("cruciform").checked; schedule(); });
+    on("downwash", "change", () => { state.design.downwash = $("downwash").checked; schedule(); });
     on("useVehicleResponse", "change", () => { state.env.useVehicleResponse = $("useVehicleResponse").checked; schedule(); });
     on("includeQPenalty", "change", () => { state.env.includeQPenalty = $("includeQPenalty").checked; schedule(); });
     on("resetTurbBtn", "click", () => { state.env.turbulence = { ...state.model.turbulence }; renderFields("turbulence", "box_turbulence", "turb"); schedule(); });

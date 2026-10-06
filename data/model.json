@@ -22,6 +22,22 @@
     "dispersionPoints": 20,
     "dispersionMaxKm": 500
   },
+  "designDefaults": {
+    "_note": "Used when a vehicle profile leaves a planform field empty (older profiles, imports).",
+    "frontTaper": 1,
+    "frontSweepLE_deg": 0,
+    "frontPlanform": "conventional",
+    "rearTaper": 1,
+    "rearSweepLE_deg": 0,
+    "rearPlanform": "conventional",
+    "rearHeight_m": 0,
+    "downwash": true
+  },
+  "delta": {
+    "_note": "Polhamus leading-edge-suction analogy (NASA TN D-3767, 1966). Kv = vortex-lift factor: pi is the slender-wing limit; Polhamus' chart gives roughly 3-3.4 for AR 0.5-2.5 – check against the chart for your AR. stallAlphaDeg: vortex breakdown reaches the trailing edge; Polhamus overpredicts lift beyond it. 25 deg gives CLmax ~1.3-1.4 for a 60 deg delta, in line with test data.",
+    "Kv": 3.14159,
+    "stallAlphaDeg": 25
+  },
   "limits": {
     "maxGustAlphaDeg": 10
   },
