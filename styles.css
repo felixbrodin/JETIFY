@@ -256,6 +256,7 @@ details.card summary::-webkit-details-marker { color: var(--acc); }
 .sv-fin { stroke-width: 1.5; }
 .sv-fin-front { fill: rgba(57,135,229,.35); stroke: var(--series-1); }
 .sv-fin-rear { fill: rgba(217,89,38,.35); stroke: var(--series-2); }
+.sv-fin-vert { fill: rgba(128,128,128,.2); stroke: var(--muted, #888); stroke-dasharray: 4 3; }
 .sv-cg { fill: #fff; stroke: #0f1420; stroke-width: 1.5; }
 .sv-cg-q { fill: #0f1420; }
 .sv-np { fill: var(--good); }

@@ -25,14 +25,20 @@
     "rearPlanform": "conventional",
     "rearOswaldE": null,
     "rearHeight_m": 0,
-    "cruciform": true,
+    "tailType": "cruciform",
+    "rearDihedral_deg": 35,
+    "finArea_m2": 0,
+    "finAR": 1.5,
+    "finSweepLE_deg": 35,
+    "finTaper": 0.5,
+    "finXle_m": 1.5888,
     "maxPower_kW": 15,
     "jetEfficiency": 0.6,
     "nozzleDiameter_m": 0.06,
     "bsfc_kgpkWh": 0.45,
     "emptyMass_kg": 35,
     "fuelMass_kg": 15,
-    "downwash": true
+    "downwash": false
   },
   {
     "id": "jetify-compact",
@@ -60,14 +66,20 @@
     "rearPlanform": "conventional",
     "rearOswaldE": null,
     "rearHeight_m": 0,
-    "cruciform": true,
+    "tailType": "cruciform",
+    "rearDihedral_deg": 35,
+    "finArea_m2": 0,
+    "finAR": 1.5,
+    "finSweepLE_deg": 35,
+    "finTaper": 0.5,
+    "finXle_m": 1.0646,
     "maxPower_kW": 20,
     "jetEfficiency": 0.55,
     "nozzleDiameter_m": 0.05,
     "bsfc_kgpkWh": 0.5,
     "emptyMass_kg": 18,
     "fuelMass_kg": 6,
-    "downwash": true
+    "downwash": false
   },
   {
     "id": "jetify-transit",
@@ -95,13 +107,19 @@
     "rearPlanform": "conventional",
     "rearOswaldE": null,
     "rearHeight_m": 0,
-    "cruciform": true,
+    "tailType": "cruciform",
+    "rearDihedral_deg": 35,
+    "finArea_m2": 0,
+    "finAR": 1.5,
+    "finSweepLE_deg": 35,
+    "finTaper": 0.5,
+    "finXle_m": 2.9,
     "maxPower_kW": 30,
     "jetEfficiency": 0.62,
     "nozzleDiameter_m": 0.08,
     "bsfc_kgpkWh": 0.42,
     "emptyMass_kg": 140,
     "fuelMass_kg": 90,
-    "downwash": true
+    "downwash": false
   }
 ]

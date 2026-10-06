@@ -133,12 +133,18 @@ const Model = (() => {
     return { b, cr, ct, mac, yMac, taper: lam, tanLE, sweepLEdeg, tanQc: tanAt(0.25), tanHc: tanAt(0.5), xle, xAc25, xCentroid };
   }
 
+  const TAIL_TYPES = ["traditional", "vtail", "tailless", "cruciform"];
+
   // Fill planform defaults (model.json designDefaults) and convert legacy frontX_m / rearX_m
   // (old profiles gave the centre of lift of a rectangular pair) to the root leading edge.
   function normalizeDesign(design, model) {
     const defs = (model && model.designDefaults) || {};
     const d = { ...design };
     Object.keys(defs).forEach(k => { if (d[k] == null) d[k] = defs[k]; });
+    // Older profiles: cruciform true → "cruciform"; false → "traditional" with no vertical fin.
+    if (!TAIL_TYPES.includes(d.tailType)) d.tailType = d.cruciform === true ? "cruciform" : "traditional";
+    if (d.finXle_m == null) d.finXle_m = d.rearXle_m;
+    delete d.cruciform;
     ["front", "rear"].forEach(n => {
       if (d[n + "Xle_m"] == null && d[n + "X_m"] != null) {
         const pf = planform(d[n + "Area_m2"], d[n + "AR"], d[n + "Taper"] != null ? d[n + "Taper"] : 1, d[n + "SweepLE_deg"] || 0, 0);
@@ -171,6 +177,28 @@ const Model = (() => {
     pair.clMax = kind === "delta" ? deltaCL(pair, pair.stallAlpha)
       : (s2.clMax != null ? CLMAX_3D * s2.clMax * cosQc : env.finCLmax);
     return pair;
+  }
+
+  // Single vertical fin (traditional / tailless). Geometry from its mirror-image pair
+  // (area 2S, AR 2·AR_geo → same MAC, a.c. and sweep lines); lift slope from the effective
+  // AR = factor·AR_geo, AR_geo = h²/S (endplate effect of fuselage / tailplane, Raymer ≈ 1.55).
+  function verticalFin(design, sec, env, model) {
+    const S = design.finArea_m2, ARg = design.finAR;
+    if (!(S > 0) || !(ARg > 0)) return null;
+    const vt = (model && model.verticalTail) || {};
+    const ARe = (vt.effectiveARFactor != null ? vt.effectiveARFactor : 1.55) * ARg;
+    const pf = planform(2 * S, 2 * ARg, design.finTaper != null ? design.finTaper : 1, design.finSweepLE_deg || 0, design.finXle_m);
+    const nu = env.kinematicViscosity_m2ps, V = env.cruiseSpeed_mps;
+    const Re = V > 0 && nu > 0 ? V * pf.mac / nu : null;
+    const s2 = sec ? sectionAt(sec, Re) : { clAlpha: 2 * Math.PI, cdMin: null, clMax: null };
+    const cosQc = 1 / Math.sqrt(1 + pf.tanQc * pf.tanQc);
+    return {
+      n: "fin", area: S, AR: ARe, ARgeo: ARg, pf, span: pf.b / 2, chord: pf.mac, xcl: pf.xAc25,
+      clAlpha: helmbold(ARe, s2.clAlpha, pf.tanHc), cd0: s2.cdMin != null ? s2.cdMin : env.finCD0, e: env.oswaldE, kind: "conventional",
+      clMax: s2.clMax != null ? CLMAX_3D * s2.clMax * cosQc : env.finCLmax,
+      section: { id: sec ? sec.id : "ideal", name: sec ? sec.name : "Ideal thin airfoil (2π)", confidence: sec ? sec.confidence : "typical", Re, a0: s2.clAlpha, cdMin: s2.cdMin, clMax2D: s2.clMax },
+      clAlphaSrc: "DATCOM(AR_eff, Λ½c, a0)"
+    };
   }
 
   // Polhamus leading-edge-suction analogy (sharp LE, delta):
@@ -378,7 +406,17 @@ const Model = (() => {
     const secs = (model.sections && model.sections.sections) || [];
     const secOf = (id) => secs.find(x => x.id === (id || (model.sections && model.sections.default) || "ideal")) || null;
     const front = finPair("front", design, c.clAlphaFront, secOf(design.frontSection), env, model);
-    const rear = finPair("rear", design, c.clAlphaRear, secOf(design.rearSection), env, model);
+    const tailType = design.tailType;
+    const rear = tailType === "tailless" ? null : finPair("rear", design, c.clAlphaRear, secOf(design.rearSection), env, model);
+    const fin = tailType === "traditional" || tailType === "tailless" ? verticalFin(design, secOf(design.finSection), env, model) : null;
+    // Share of each surface's force in pitch / yaw. V-tail (Purser–Campbell): cos Γ / sin Γ per
+    // panel, so the effective slope in each plane scales with cos²Γ / sin²Γ.
+    const G = (design.rearDihedral_deg || 0) / DEG;
+    const proj = {
+      front: { pitch: 1, yaw: tailType === "cruciform" ? 1 : 0 },
+      rear: tailType === "vtail" ? { pitch: Math.cos(G), yaw: Math.sin(G) } : { pitch: 1, yaw: tailType === "cruciform" ? 1 : 0 },
+      fin: { pitch: 0, yaw: 1 }
+    };
     const m0 = design.emptyMass_kg + (env.payload_kg || 0) + design.fuelMass_kg;
     const mEnd = m0 - design.fuelMass_kg * (1 - env.reserveFraction);
     const W = m0 * g;
@@ -392,12 +430,12 @@ const Model = (() => {
     const An = Math.PI / 4 * design.nozzleDiameter_m * design.nozzleDiameter_m;
     const etaJet = c.etaJet != null ? c.etaJet : design.jetEfficiency;
     return {
-      g, rho, hull, front, rear, m0, mEnd, W, xcg, I0, Iadd, mAdd, An, etaJet,
+      g, rho, hull, front, rear, fin, tailType, proj, m0, mEnd, W, xcg, I0, Iadd, mAdd, An, etaJet,
       nu: env.kinematicViscosity_m2ps,
       extraDragArea: (c.extraDragArea_m2 != null ? c.extraDragArea_m2 : (hy.extraDragArea_m2 || 0)),
       hullCDwetOverride: c.hullCDwet != null ? c.hullCDwet : null,
-      cruciform: !!design.cruciform,
-      downwash: design.downwash !== false, tailHeight: design.rearHeight_m || 0,
+      cruciform: tailType === "cruciform",
+      downwash: design.downwash !== false && !!rear, tailHeight: design.rearHeight_m || 0,
       extraDamping: design.extraPitchDamping_Nms || 0
     };
   }
@@ -412,12 +450,21 @@ const Model = (() => {
 
   // Trim at dynamic pressure qbar. A delta's lift centre moves with α (vortex lift), so the
   // split and the lift states are iterated to a fixed point.
+  // Rear CL is the panel CL (V-tail panels carry L_rear/cos Γ). Tailless: the wing carries W
+  // and elevon trim is assumed (its moment balances; its trim drag is not modelled).
   function trim(ctx, qbar) {
+    if (!ctx.rear) {
+      const split = { Lf: ctx.W, Lr: 0, degenerate: false, elevonTrim: true };
+      const CLf = ctx.W / (qbar * ctx.front.area);
+      const fs = liftState(ctx.front, CLf);
+      return { split, CLf, CLr: 0, fs, rs: null, dw: { E: 0, lH: 0 } };
+    }
+    const pr = ctx.proj.rear.pitch;
     let xf = ctx.front.pf.xAc25, xr = ctx.rear.pf.xAc25, split, CLf, CLr, fs, rs;
     for (let it = 0; it < 8; it++) {
       split = liftSplit(ctx, xf, xr);
       CLf = split.Lf / (qbar * ctx.front.area);
-      CLr = split.Lr / (qbar * ctx.rear.area);
+      CLr = split.Lr / (qbar * ctx.rear.area * pr);
       fs = liftState(ctx.front, CLf); rs = liftState(ctx.rear, CLr);
       if (Math.abs(fs.xLift - xf) < 1e-7 && Math.abs(rs.xLift - xr) < 1e-7) break;
       xf = fs.xLift; xr = rs.xLift;
@@ -426,18 +473,26 @@ const Model = (() => {
   }
 
   // Pitch/heave (vertical) and yaw/sway (lateral) systems at speed V.
+  // vTags / lTags describe the fins of each system: { name, pair, proj, st } (st = lift state about trim).
   function planeSystems(ctx, V, qbar, tr) {
     const Mah = (ctx.hull.lamb.k2 - ctx.hull.lamb.k1) * ctx.rho * ctx.hull.volume * V * V;
     const base = {
       V, qbar, Mah, Mqx: -Math.abs(ctx.extraDamping), mPrime: ctx.m0 + ctx.mAdd, Iprime: ctx.I0 + ctx.Iadd, hullL: ctx.hull.L,
       fkMass: (1 + ctx.hull.lamb.k2) * ctx.rho * ctx.hull.volume, fkArm: ctx.hull.L / 2 - ctx.xcg
     };
-    const fin = (pair, slope, x, dw) => ({ K: qbar * pair.area * slope, l: x - ctx.xcg, chord: pair.chord, x, dw });
+    const fin = (t, slope, x, dw) => ({ K: qbar * t.pair.area * slope * t.proj * t.proj, l: x - ctx.xcg, chord: t.pair.chord, x, dw });
+    const vTags = [{ name: "front", pair: ctx.front, proj: 1, st: tr.fs }];
+    if (ctx.rear && ctx.proj.rear.pitch > 0) vTags.push({ name: "rear", pair: ctx.rear, proj: ctx.proj.rear.pitch, st: tr.rs });
     const dw = tr.dw.E > 0 ? { src: 0, E: tr.dw.E, tau: tr.dw.lH / V } : null;
-    const vert = planeSystem({ ...base, fins: [fin(ctx.front, tr.fs.slope, tr.fs.xAc), fin(ctx.rear, tr.rs.slope, tr.rs.xAc, dw)] });
+    const vert = planeSystem({ ...base, fins: vTags.map((t, i) => fin(t, t.st.slope, t.st.xAc, i === 1 ? dw : null)) });
     // Lateral surfaces fly at zero side-force trim: attached-flow slope at ¼-MAC, no sidewash.
-    const lat = planeSystem({ ...base, fins: ctx.cruciform ? [fin(ctx.front, ctx.front.clAlpha, ctx.front.pf.xAc25), fin(ctx.rear, ctx.rear.clAlpha, ctx.rear.pf.xAc25)] : [] });
-    return { vert, lat };
+    const lTags = [];
+    if (ctx.proj.front.yaw > 0) lTags.push({ name: "front", pair: ctx.front, proj: ctx.proj.front.yaw });
+    if (ctx.rear && ctx.proj.rear.yaw > 0) lTags.push({ name: ctx.tailType === "vtail" ? "V-tail" : "rear", pair: ctx.rear, proj: ctx.proj.rear.yaw });
+    if (ctx.fin) lTags.push({ name: "fin", pair: ctx.fin, proj: 1 });
+    lTags.forEach(t => { t.st = liftState(t.pair, 0); });
+    const lat = planeSystem({ ...base, fins: lTags.map(t => fin(t, t.pair.clAlpha, t.pair.pf.xAc25)) });
+    return { vert, lat, vTags, lTags };
   }
 
   // Everything at one speed. opts.withDynamics: use vehicle response in drag/load penalty.
@@ -447,7 +502,8 @@ const Model = (() => {
     const qbar = 0.5 * ctx.rho * V * V;
     const tr = trim(ctx, qbar);
     const split = tr.split, CLf = tr.CLf, CLr = tr.CLr;
-    const { vert, lat } = planeSystems(ctx, V, qbar, tr);
+    const { vert, lat, vTags, lTags } = planeSystems(ctx, V, qbar, tr);
+    const hasYaw = lTags.length > 0;
     const tu = env.turbulence;
     const phiW = (Om) => phiTransverse(Om, tu.sigma_w, tu.L_w);
     const phiV = (Om) => phiTransverse(Om, tu.sigma_v, tu.L_v);
@@ -456,7 +512,10 @@ const Model = (() => {
     const useDynV = opts.withDynamics && vert.stable;
     const useDynL = opts.withDynamics && lat.stable;
     const sv = planeStats(vert, phiW, grid, !useDynV);
-    const sl = ctx.cruciform ? planeStats(lat, phiV, grid, !useDynL) : null;
+    const sl = hasYaw ? planeStats(lat, phiV, grid, !useDynL) : null;
+    // Per-surface panel incidence σ (plane incidence × projection).
+    const surfV = vTags.map((t, i) => ({ ...t, CL: i === 0 ? CLf : CLr, sig: sv.sigFinAlpha[i] * t.proj }));
+    const surfL = sl ? lTags.map((t, i) => ({ ...t, sig: sl.sigFinAlpha[i] * t.proj })) : [];
 
     // Dynamic-pressure penalty from u/v/w (optional; the reference script ignores it).
     let qPar = qbar;
@@ -474,17 +533,17 @@ const Model = (() => {
     const Cf = ittcCf(Re);
     const CDwet = ctx.hullCDwetOverride != null ? ctx.hullCDwetOverride : Cf * ctx.hull.formFactor;
     const D_hull = qPar * ctx.hull.wetted * CDwet;
-    const planes = ctx.cruciform ? 2 : 1;
-    const finCD0A = ctx.front.cd0 * ctx.front.area + ctx.rear.cd0 * ctx.rear.area;
-    const D_finProfile = qPar * finCD0A * planes;
+    const pairsCD0A = (ctx.front.cd0 * ctx.front.area + (ctx.rear ? ctx.rear.cd0 * ctx.rear.area : 0)) * (ctx.cruciform ? 2 : 1);
+    const finCD0A = pairsCD0A + (ctx.fin ? ctx.fin.cd0 * ctx.fin.area : 0);
+    const D_finProfile = qPar * finCD0A;
     // Lift-dependent drag: E[CDi(α0 + α_g)] ≈ CDi(α0) + ½·CDi''(α0)·σα²  (exact for the parabolic polar).
-    const D_trim = qbar * (ctx.front.area * tr.fs.CDi + ctx.rear.area * tr.rs.CDi);
-    const gust = (pair, st, sig) => qbar * pair.area * 0.5 * st.d2 * sig * sig;
-    const D_gustV = gust(ctx.front, tr.fs, sv.sigFinAlpha[0]) + gust(ctx.rear, tr.rs, sv.sigFinAlpha[1]);
-    const D_gustL = sl ? gust(ctx.front, liftState(ctx.front, 0), sl.sigFinAlpha[0]) + gust(ctx.rear, liftState(ctx.rear, 0), sl.sigFinAlpha[1]) : 0;
+    const D_trim = qbar * (ctx.front.area * tr.fs.CDi + (ctx.rear ? ctx.rear.area * tr.rs.CDi : 0));
+    const gust = (t) => qbar * t.pair.area * 0.5 * t.st.d2 * t.sig * t.sig;
+    const D_gustV = surfV.reduce((a, t) => a + gust(t), 0);
+    const D_gustL = surfL.reduce((a, t) => a + gust(t), 0);
     const D_extra = qPar * ctx.extraDragArea;
     const D = D_hull + D_finProfile + D_trim + D_gustV + D_gustL + D_extra;
-    const D_calm = qbar * ctx.hull.wetted * CDwet + qbar * finCD0A * planes + D_trim + qbar * ctx.extraDragArea;
+    const D_calm = qbar * ctx.hull.wetted * CDwet + qbar * finCD0A + D_trim + qbar * ctx.extraDragArea;
 
     // Propulsion
     const jet = jetForThrust(D, V, ctx.rho, ctx.An);
@@ -503,7 +562,7 @@ const Model = (() => {
     const fuelFlow_kgph = bsfc * P_engine * 3600;
 
     return {
-      V, qbar, qPar, Re, Cf, CDwet, split, CLf, CLr, trim: tr,
+      V, qbar, qPar, Re, Cf, CDwet, split, CLf, CLr, trim: tr, hasYaw, surfV, surfL,
       vert, lat, sv, sl, useDynV, useDynL,
       drag: { hull: D_hull, finProfile: D_finProfile, trim: D_trim, gustV: D_gustV, gustL: D_gustL, extra: D_extra, total: D, calm: D_calm },
       jet, P_engine, etaTot, avail, throttle, feasible: throttle <= 1,
@@ -555,27 +614,28 @@ const Model = (() => {
     const disp = distances.map(X => ({
       km: X / 1000,
       depth_m: dispersion(chosen.vert, chosen.phiW, chosen.V, X, sp),
-      lateral_m: ctx.cruciform ? dispersion(chosen.lat, chosen.phiV, chosen.V, X, sp) : Infinity
+      lateral_m: chosen.hasYaw ? dispersion(chosen.lat, chosen.phiV, chosen.V, X, sp) : Infinity
     }));
     const per1km = {
       depth_m: dispersion(chosen.vert, chosen.phiW, chosen.V, 1000, sp),
-      lateral_m: ctx.cruciform ? dispersion(chosen.lat, chosen.phiV, chosen.V, 1000, sp) : Infinity
+      lateral_m: chosen.hasYaw ? dispersion(chosen.lat, chosen.phiV, chosen.V, 1000, sp) : Infinity
     };
     const atRange = disp.length ? disp[disp.length - 1] : null;
     const pathAngle = {
       vert_rad: pathAngleRms(chosen.vert, chosen.phiW, chosen.V, sp),
-      lat_rad: ctx.cruciform ? pathAngleRms(chosen.lat, chosen.phiV, chosen.V, sp) : Infinity
+      lat_rad: chosen.hasYaw ? pathAngleRms(chosen.lat, chosen.phiV, chosen.V, sp) : Infinity
     };
 
-    // Static-margin design sweep vs rear-pair root-LE position (same speed, trim and downwash model).
+    // Static-margin design sweep vs the rear pair's root-LE position (tailless: the wing's).
     const smSweep = [];
+    const smSweepOf = ctx.rear ? "rear" : "front";
     const nS = 40;
     for (let i = 0; i <= nS; i++) {
-      const xr = ctx.hull.L * i / nS;
-      const c2 = resolve({ ...design, rearXle_m: xr }, env, model, calib);
+      const x = ctx.hull.L * i / nS;
+      const c2 = resolve({ ...design, [smSweepOf + "Xle_m"]: x }, env, model, calib);
       const tr2 = trim(c2, chosen.qbar);
       const v2 = planeSystems(c2, chosen.V, chosen.qbar, tr2).vert;
-      smSweep.push({ x: xr, sm: v2.La > 0 ? -v2.Ma / v2.La / c2.hull.L * 100 : NaN });
+      smSweep.push({ x, sm: v2.La > 0 ? -v2.Ma / v2.La / c2.hull.L * 100 : NaN });
     }
 
     // Spectrum chart data: raw w-spectrum vs incidence felt at the rear pair.
@@ -585,7 +645,7 @@ const Model = (() => {
       const Om = grid.om[k];
       const raw = chosen.phiW(Om) / (chosen.V * chosen.V);
       const t = chosen.vert.transfer(Om, !chosen.useDynV);
-      spectrum.push({ Om, raw, felt: cabs2(t.finAlpha[1]) * chosen.phiW(Om) });
+      spectrum.push({ Om, raw, felt: cabs2(t.finAlpha[t.finAlpha.length - 1]) * chosen.phiW(Om) });
     }
 
     // ---------- Warnings ----------
@@ -602,14 +662,14 @@ const Model = (() => {
       warnings.push(`Statically UNSTABLE in pitch: neutral point (${round(xnp, 3)} m) is ahead of CG (${round(ctx.xcg, 3)} m). Move fins aft, enlarge the rear pair or move CG forward.`);
     else if (!chosen.vert.stable)
       warnings.push("Pitch/heave mode is dynamically unstable – trajectory dispersion is unbounded without control.");
-    if (!ctx.cruciform)
-      warnings.push("No vertical surfaces (cruciform off): the hull alone is unstable in yaw (Munk moment) – lateral dispersion is unbounded.");
+    if (!chosen.hasYaw)
+      warnings.push("No vertical surfaces (fin area 0): the hull alone is unstable in yaw (Munk moment) – lateral dispersion is unbounded.");
     else if (!chosen.lat.stable)
       warnings.push("Yaw/sway mode is unstable – lateral dispersion is unbounded without control.");
     if (chosen.CLf < 0 || chosen.CLr < 0)
       warnings.push(`CG (${round(ctx.xcg, 2)} m) lies outside the fin pairs – one pair carries negative lift (CL_front ${round(chosen.CLf, 3)}, CL_rear ${round(chosen.CLr, 3)}).`);
     const T = chosen.trim;
-    [["front", chosen.CLf, chosen.sv.sigFinAlpha[0], ctx.front, T.fs], ["rear", chosen.CLr, chosen.sv.sigFinAlpha[1], ctx.rear, T.rs]].forEach(([n, CL, s, pair, st]) => {
+    chosen.surfV.map(t => [t.name, t.CL, t.sig, t.pair, t.st]).forEach(([n, CL, s, pair, st]) => {
       if (st.stalled)
         warnings.push(`The ${n} pair is beyond its stall limit already at trim (α ≈ ${round(st.alpha * DEG, 1)}°, CL ${round(CL, 2)}, CLmax ${round(pair.clMax, 2)}).`);
       else if (Math.abs(CL) + 2 * st.slope * s > pair.clMax)
@@ -617,9 +677,11 @@ const Model = (() => {
       if (pair.kind === "delta" && pair.pf.sweepLEdeg < 45)
         warnings.push(`The ${n} pair uses the delta (vortex-lift) model with only ${round(pair.pf.sweepLEdeg, 0)}° LE sweep – the Polhamus analogy assumes a sharp, highly swept leading edge (≳ 45–50°).`);
     });
+    if (ctx.downwash && ctx.rear && ctx.rear.span > ctx.front.span)
+      warnings.push(`Downwash: the rear pair (b ${round(ctx.rear.span, 2)} m) is wider than the front pair (b ${round(ctx.front.span, 2)} m). The DATCOM formula assumes the tail lies inside the wing's vortex span; the outer tail sees upwash, so dε/dα (${round(T.dw.E, 2)}) is overestimated and the static margin underestimated. Consider switching downwash off for small front fins.`);
     if (T.dw.capped)
       warnings.push(`Downwash gradient dε/dα ≈ ${round(T.dw.E0, 2)} from the DATCOM formula was capped at 0.95 – the rear pair sits very close behind the front pair (l_H ${round(T.dw.lH, 2)} m), outside the formula's range.`);
-    [["front", ctx.front], ["rear", ctx.rear]].forEach(([n, pair]) => {
+    [["front", ctx.front], ["rear", ctx.rear], ["fin", ctx.fin]].filter(([, p]) => p).forEach(([n, pair]) => {
       const q = pair.section, sec = ((model.sections && model.sections.sections) || []).find(x => x.id === q.id);
       if (q.confidence === "rough")
         warnings.push(`The ${n} section (${q.name}) uses ROUGH placeholder coefficients – verify against the cited source in data/sections.json before using the result as justification.`);
@@ -629,7 +691,7 @@ const Model = (() => {
           warnings.push(`The ${n} fin chord Re ≈ ${q.Re.toExponential(1)} is outside the ${q.name} data (${lo.toExponential(0)}–${hi.toExponential(0)}); the nearest data point is used. Check the kinematic viscosity (water ≈ 1.3e-6, air ≈ 1.5e-5 m²/s).`);
       }
     });
-    [["Front", ctx.front.xcl], ["Rear", ctx.rear.xcl], ["CG", ctx.xcg]].forEach(([n, x]) => {
+    [["Front", ctx.front.xcl], ["Rear", ctx.rear && ctx.rear.xcl], ["Fin", ctx.fin && ctx.fin.xcl], ["CG", ctx.xcg]].filter(([, x]) => x != null).forEach(([n, x]) => {
       if (x < 0 || x > ctx.hull.L) warnings.push(`${n} position ${round(x, 2)} m is outside the hull (0–${round(ctx.hull.L, 2)} m).`);
     });
     if (ctx.mEnd >= ctx.m0 || design.fuelMass_kg <= 0) warnings.push("No usable fuel – check fuel mass and reserve.");
@@ -639,11 +701,14 @@ const Model = (() => {
     const steps = [
       { t: "Mass", d: `m0 = ${round(ctx.m0, 2)} kg (empty ${round(design.emptyMass_kg, 2)} + payload ${round(env.payload_kg || 0, 2)} + fuel ${round(design.fuelMass_kg, 2)}); m_end = ${round(ctx.mEnd, 2)} kg (reserve ${round(env.reserveFraction * 100, 0)} % of fuel)` },
       { t: "Hull", d: `L/D = ${round(ctx.hull.lam, 2)}, S_wet = ${round(ctx.hull.wetted, 3)} m², Vol = ${round(ctx.hull.volume * 1000, 1)} L, Re = ${chosen.Re.toExponential(2)}, Cf = ${round(chosen.Cf, 5)}, FF = ${round(ctx.hull.formFactor, 3)}` },
-      { t: "Planform", d: ["front", "rear"].map(n => { const p = ctx[n], f = p.pf; return `${n} (${p.kind}): b = ${round(f.b, 3)} m, c_root ${round(f.cr, 3)} / c_tip ${round(f.ct, 3)} m, MAC ${round(f.mac, 3)} m, Λ_LE ${round(f.sweepLEdeg, 1)}°, Λ½c ${round(Math.atan(f.tanHc) * DEG, 1)}°, apex x ${round(f.xle, 3)} m → ¼-MAC x ${round(f.xAc25, 3)} m`; }).join(" · ") },
-      { t: "Lift", d: ["front", "rear"].map(n => { const p = ctx[n], q = p.section, st = chosen.trim[n === "front" ? "fs" : "rs"]; return `${n}: ${q.name}, Re_MAC = ${q.Re != null ? q.Re.toExponential(2) : "–"}, cℓα = ${round(q.a0, 2)} → CLα = ${round(p.clAlpha, 2)}/rad` + (p.kind === "delta" ? ` (Kp), Kv = ${round(p.Kv, 2)}; trim α ${round(st.alpha * DEG, 2)}°, dCL/dα ${round(st.slope, 2)}/rad, a.c. x ${round(st.xAc, 3)} m` : `, e = ${round(p.e, 2)}`) + `, CD0 = ${round(p.cd0, 4)}, CLmax = ${round(p.clMax, 2)}`; }).join(" · ") },
-      { t: "Downwash", d: ctx.downwash ? `dε/dα at rear = ${round(chosen.trim.dw.E, 3)} (l_H ${round(chosen.trim.dw.lH, 3)} m, tail height ${round(ctx.tailHeight, 3)} m) → rear pair effectiveness ${round((1 - chosen.trim.dw.E) * 100, 0)} %` : "off" },
-      { t: "Static balance (L = W)", d: `q = ${round(chosen.qbar, 0)} Pa · L_front = ${round(chosen.split.Lf, 1)} N (CL ${round(chosen.CLf, 3)}), L_rear = ${round(chosen.split.Lr, 1)} N (CL ${round(chosen.CLr, 3)})` },
-      { t: "Gust incidence (freq. domain)", d: `σ_α front ${round(chosen.sv.sigFinAlpha[0] * DEG, 2)}°, rear ${round(chosen.sv.sigFinAlpha[1] * DEG, 2)}° (${chosen.useDynV ? "with vehicle response" : "fixed attitude, as script"})` },
+      { t: "Tail", d: { traditional: "traditional – horizontal tail (rear pair) + vertical fin", vtail: `V-tail – rear pair at dihedral Γ ${round(Math.acos(ctx.proj.rear.pitch) * DEG, 1)}° (pitch cos²Γ = ${round(ctx.proj.rear.pitch ** 2, 3)}, yaw sin²Γ = ${round(ctx.proj.rear.yaw ** 2, 3)})`, tailless: "tailless – wing only (elevon trim) + optional vertical fin", cruciform: "cruciform – both pairs also act in yaw" }[ctx.tailType] + (ctx.fin ? `; fin S ${round(ctx.fin.area, 4)} m², h ${round(ctx.fin.span, 3)} m, AR_geo ${round(ctx.fin.ARgeo, 2)} → AR_eff ${round(ctx.fin.AR, 2)}, CLα ${round(ctx.fin.clAlpha, 2)}/rad, a.c. x ${round(ctx.fin.xcl, 3)} m` : "") },
+      { t: "Planform", d: ["front", "rear"].filter(n => ctx[n]).map(n => { const p = ctx[n], f = p.pf; return `${n} (${p.kind}): b = ${round(f.b, 3)} m, c_root ${round(f.cr, 3)} / c_tip ${round(f.ct, 3)} m, MAC ${round(f.mac, 3)} m, Λ_LE ${round(f.sweepLEdeg, 1)}°, Λ½c ${round(Math.atan(f.tanHc) * DEG, 1)}°, apex x ${round(f.xle, 3)} m → ¼-MAC x ${round(f.xAc25, 3)} m`; }).join(" · ") },
+      { t: "Lift", d: ["front", "rear"].filter(n => ctx[n]).map(n => { const p = ctx[n], q = p.section, st = chosen.trim[n === "front" ? "fs" : "rs"]; return `${n}: ${q.name}, Re_MAC = ${q.Re != null ? q.Re.toExponential(2) : "–"}, cℓα = ${round(q.a0, 2)} → CLα = ${round(p.clAlpha, 2)}/rad` + (p.kind === "delta" ? ` (Kp), Kv = ${round(p.Kv, 2)}; trim α ${round(st.alpha * DEG, 2)}°, dCL/dα ${round(st.slope, 2)}/rad, a.c. x ${round(st.xAc, 3)} m` : `, e = ${round(p.e, 2)}`) + `, CD0 = ${round(p.cd0, 4)}, CLmax = ${round(p.clMax, 2)}`; }).join(" · ") },
+      { t: "Downwash", d: !ctx.rear ? "no rear pair" : ctx.downwash ? `dε/dα at rear = ${round(chosen.trim.dw.E, 3)} (l_H ${round(chosen.trim.dw.lH, 3)} m, tail height ${round(ctx.tailHeight, 3)} m) → rear pair effectiveness ${round((1 - chosen.trim.dw.E) * 100, 0)} %` : "off" },
+      { t: "Static balance (L = W)", d: ctx.rear
+        ? `q = ${round(chosen.qbar, 0)} Pa · L_front = ${round(chosen.split.Lf, 1)} N (CL ${round(chosen.CLf, 3)}), L_rear = ${round(chosen.split.Lr, 1)} N (${ctx.tailType === "vtail" ? "panel CL " + round(chosen.CLr, 3) + ", Γ " + round(Math.acos(ctx.proj.rear.pitch) * DEG, 1) + "°" : "CL " + round(chosen.CLr, 3)})`
+        : `q = ${round(chosen.qbar, 0)} Pa · tailless: wing carries W = ${round(chosen.split.Lf, 1)} N (CL ${round(chosen.CLf, 3)}); pitch trim by elevons assumed (trim drag not modelled)` },
+      { t: "Gust incidence (freq. domain)", d: `σ_α ${chosen.surfV.map(t => t.name + " " + round(t.sig * DEG, 2) + "°").join(", ")}${chosen.surfL.length ? " · lateral " + chosen.surfL.map(t => t.name + " " + round(t.sig * DEG, 2) + "°").join(", ") : ""} (${chosen.useDynV ? "with vehicle response" : "fixed attitude, as script"})` },
       { t: "Drag build-up", d: `hull ${round(D.hull, 1)} + fin profile ${round(D.finProfile, 1)} + trim induced ${round(D.trim, 1)} + gust (vert) ${round(D.gustV, 1)} + gust (lat) ${round(D.gustL, 1)} + extra ${round(D.extra, 1)} = ${round(D.total, 1)} N` },
       { t: "Waterjet", d: `T = D → Vj = ${round(chosen.jet.Vj, 2)} m/s, η_F = ${round(chosen.jet.etaF, 3)}, P_jet = ${round(chosen.jet.Pjet / 1000, 2)} kW, P_engine = P_jet/η_jet = ${round(chosen.P_engine / 1000, 2)} kW (${round(chosen.throttle * 100, 0)} % of max)` },
       { t: "Breguet", d: `R = η_jet·η_F/(BSFC·g)·(L/D)·ln(m0/m_end) = ${round(chosen.etaTot, 3)}/(BSFC·g)·${round(chosen.LD, 3)}·${round(chosen.lnM, 4)} = ${round(chosen.rangeKm, 2)} km  (equiv. c = ${round(chosen.cEq_perHour, 3)} 1/h)` },
@@ -653,7 +718,7 @@ const Model = (() => {
     return {
       design, env, ctx, chosen, scan, best, vMax,
       xnp, staticMargin_m, staticMargin_pct,
-      disp, per1km, atRange, pathAngle, smSweep, spectrum,
+      disp, per1km, atRange, pathAngle, smSweep, smSweepOf, spectrum,
       warnings, steps
     };
   }

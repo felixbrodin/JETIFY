@@ -135,7 +135,7 @@
 
   // Position sliders (CG, fins) are bounded by the hull length.
   function syncPositionLimits() {
-    ["hull", "front", "rear"].forEach(g => (state.vars.groups[g] || []).forEach(def => {
+    ["hull", "front", "rear", "fin"].forEach(g => (state.vars.groups[g] || []).forEach(def => {
       if (typeof def.max !== "string") return;
       const el = $("f_" + def.key);
       if (!el) return;
@@ -155,8 +155,11 @@
     renderPlanformSelect("rearPlanform", "box_rear");
     renderSectionSelect("rearSection", "box_rear");
     $("downwash").checked = state.design.downwash !== false;
+    renderFields("fin", "box_fin", "design");
+    renderSectionSelect("finSection", "box_fin");
     renderFields("propulsion", "box_propulsion", "design");
-    $("cruciform").checked = !!state.design.cruciform;
+    $("tailType").value = state.design.tailType;
+    applyTailType();
   }
   // Drop-down bound to state.design[key]. list: [{id, name, hint?}].
   function renderSelect(key, containerId, label, list, fallback) {
@@ -191,6 +194,25 @@
       hint: (x.note ? x.note + " " : "") + "Source: " + x.source
     }));
     renderSelect(key, containerId, "2D section (airfoil)", list, sc && sc.default);
+  }
+
+  // Show the boxes/fields that the selected tail configuration uses.
+  const TAIL_HINTS = {
+    traditional: "Rear pair = horizontal tail (pitch only); the vertical fin gives yaw stability.",
+    vtail: "Rear pair = the two V-tail panels (area, AR and span measured along the panels). Pitch share cos²Γ, yaw share sin²Γ (Purser–Campbell).",
+    tailless: "Wing only. Pitch trim by elevons is assumed (trim drag not modelled); static margin = wing a.c. − CG. Fin area 0 = pure flying wing.",
+    cruciform: "AUV layout: both pairs act in pitch and, as a second identical pair, in yaw."
+  };
+  function applyTailType() {
+    const t = state.design.tailType;
+    const vis = (el, on) => { if (el) el.classList.toggle("hidden", !on); };
+    vis($("rearWrap"), t !== "tailless");
+    vis($("finWrap"), t === "traditional" || t === "tailless");
+    const dih = $("f_rearDihedral_deg");
+    vis(dih && dih.closest("label"), t === "vtail");
+    $("frontTitle").textContent = t === "cruciform" ? "Front pair" : "Wing (front pair)";
+    $("rearTitle").textContent = { traditional: "Horizontal tail (rear pair)", vtail: "V-tail (rear pair)", cruciform: "Rear pair" }[t] || "Rear pair";
+    $("tailTypeHint").textContent = TAIL_HINTS[t] || "";
   }
 
   const PLANFORMS = [
@@ -300,7 +322,7 @@
     const r = state.last, I = Model._internal;
     const theory = (n) => r ? I.helmbold(r.ctx[n].AR, r.ctx[n].section.a0, r.ctx[n].pf.tanHc) : I.helmbold(state.design[n + "AR"]);
     $("cc_claf").textContent = fmt(theory("front"), 2);
-    $("cc_clar").textContent = fmt(theory("rear"), 2);
+    $("cc_clar").textContent = r && !r.ctx.rear ? "–" : fmt(theory("rear"), 2);
     $("cc_eta").textContent = fmt(state.design.jetEfficiency, 2);
     $("cc_extra").textContent = fmt(state.model.hydro.extraDragArea_m2 || 0, 4);
   }
@@ -336,9 +358,11 @@
     $("smBig").textContent = fmt(r.staticMargin_pct, 1);
     $("smSub").textContent = r.staticMargin_m > 0 ? "of hull length · stable" : "of hull length · UNSTABLE";
 
-    chip("cf_stab", r.staticMargin_m > 0 && c.vert.stable && (!ctx.cruciform || c.lat.stable) ? "✓ stable" : "✕ unstable", r.staticMargin_m > 0 && c.vert.stable && ctx.cruciform && c.lat.stable ? "good" : "bad");
+    const stableAll = r.staticMargin_m > 0 && c.vert.stable && c.hasYaw && c.lat.stable;
+    chip("cf_stab", stableAll ? "✓ stable" : "✕ unstable", stableAll ? "good" : "bad");
     chip("cf_feas", (c.feasible ? "✓ " : "✕ ") + fmt(c.throttle * 100, 0) + " % power", c.feasible ? "good" : "bad");
-    chip("cf_cla", "CLα " + fmt(ctx.front.clAlpha, 2) + " / " + fmt(ctx.rear.clAlpha, 2), ctx.front.clAlphaSrc === "empirical" || ctx.rear.clAlphaSrc === "empirical" ? "emp" : "teo");
+    const surfs = [ctx.front, ctx.rear, ctx.fin].filter(Boolean);
+    chip("cf_cla", "CLα " + surfs.map(p => fmt(p.clAlpha, 2)).join(" / "), surfs.some(p => p.clAlphaSrc === "empirical") ? "emp" : "teo");
     chip("cf_hull", "C_D,wet " + fmt(c.CDwet, 5), ctx.hullCDwetOverride != null ? "emp" : "teo");
     chip("cf_eta", "η_jet " + fmt(ctx.etaJet, 2), $("cal_eta_use").checked ? "emp" : "teo");
     chip("cf_mode", c.useDynV ? "gust: with vehicle response" : "gust: fixed attitude", "teo");
@@ -348,8 +372,8 @@
     $("tsNP").textContent = fmt(r.xnp, 3) + " m from nose";
     $("tsSM").textContent = fmt(r.staticMargin_m, 3) + " m (" + fmt(r.staticMargin_pct, 1) + " % L)";
     $("tsPitch").textContent = modeTxt(c.vert) + (c.vert.stable ? " · eig " + c.vert.eig.map(e => fmt(e.re, 1) + (Math.abs(e.im) > 1e-9 ? (e.im > 0 ? "+" : "−") + fmt(Math.abs(e.im), 1) + "i" : "")).join(", ") : "");
-    $("tsYaw").textContent = ctx.cruciform ? modeTxt(c.lat) : "no vertical surfaces";
-    $("tsAlpha").textContent = fmt(c.sv.sigFinAlpha[0] * DEG, 2) + "° / " + fmt(c.sv.sigFinAlpha[1] * DEG, 2) + "°";
+    $("tsYaw").textContent = c.hasYaw ? modeTxt(c.lat) : "no vertical surfaces";
+    $("tsAlpha").textContent = c.surfV.map(t => t.name + " " + fmt(t.sig * DEG, 2) + "°").join(" / ");
     $("tsN").textContent = "1 ± " + fmt(c.sv.sigL / ctx.W, 2) + " g";
     $("tsQ").textContent = fmt(c.sv.sigQ * DEG, 2) + " °/s";
     $("tsGamma").textContent = fmt(r.pathAngle.vert_rad * DEG, 2) + "° / " + fmt(r.pathAngle.lat_rad * DEG, 2) + "°";
@@ -401,7 +425,7 @@
   function drawSideView(r) {
     const ctx = r.ctx, d = state.design;
     const W = 640, Hmax = 220, pad = 28;
-    const bMax = Math.max(ctx.front.span, ctx.rear.span);
+    const bMax = Math.max(ctx.front.span, ctx.rear ? ctx.rear.span : 0, ctx.fin ? 2 * ctx.fin.span : 0);
     const s = Math.min((W - 2 * pad) / ctx.hull.L, (Hmax - 2 * pad - 24) / (ctx.hull.D + bMax));
     const H = Math.max(120, (ctx.hull.D + bMax) * s + 2 * pad + 24);
     const x0 = (W - ctx.hull.L * s) / 2, yc = pad + (bMax / 2 + ctx.hull.D / 2) * s;
@@ -427,7 +451,14 @@
       return out;
     };
     svg += fin(ctx.front, "sv-fin sv-fin-front", "front");
-    svg += fin(ctx.rear, "sv-fin sv-fin-rear", "rear");
+    if (ctx.rear) svg += fin(ctx.rear, "sv-fin sv-fin-rear", ctx.tailType === "vtail" ? "V-tail" : "rear");
+    // Vertical fin: one surface, drawn above the hull (dashed).
+    if (ctx.fin) {
+      const p = ctx.fin, f = p.pf, yr = yc - hr, yt = yr - p.span * s;
+      const rootLE = X(f.xle), rootTE = X(f.xle + f.cr), tipLE = X(f.xle + p.span * f.tanLE), tipTE = X(f.xle + p.span * f.tanLE + f.ct);
+      svg += `<path class="sv-fin sv-fin-vert" d="M ${rootLE} ${yr} L ${tipLE} ${yt} L ${tipTE} ${yt} L ${rootTE} ${yr} Z"/>`;
+      svg += `<text class="sv-label" x="${X(f.xAc25)}" y="${yt - 6}" text-anchor="middle">fin a.c. ${fmt(f.xAc25, 2)} m</text>`;
+    }
     // CG
     const cgx = X(ctx.xcg);
     svg += `<circle class="sv-cg" cx="${cgx}" cy="${yc}" r="6"/><path class="sv-cg-q" d="M ${cgx} ${yc} L ${cgx + 6} ${yc} A 6 6 0 0 1 ${cgx} ${yc + 6} Z M ${cgx} ${yc} L ${cgx - 6} ${yc} A 6 6 0 0 1 ${cgx} ${yc - 6} Z"/>`;
@@ -570,18 +601,18 @@
       empty: "Unbounded – the vehicle is unstable without control."
     });
     makeChart($("chartSM"), {
-      title: "Static margin vs rear-pair position",
+      title: r.smSweepOf === "rear" ? "Static margin vs tail position" : "Static margin vs wing position",
       series: [{ name: "Static margin (% of L)", cls: "s1", data: r.smSweep.map(p => ({ x: p.x, y: p.sm })) }],
-      xLabel: "Rear pair root LE x (m from nose)", yLabel: "Static margin (% L)",
-      markers: [{ x: r.ctx.rear.pf.xle, label: "current " + fmt(r.ctx.rear.pf.xle, 2) + " m" }],
+      xLabel: (r.smSweepOf === "rear" ? "Rear pair" : "Wing") + " root LE x (m from nose)", yLabel: "Static margin (% L)",
+      markers: [{ x: r.ctx[r.smSweepOf].pf.xle, label: "current " + fmt(r.ctx[r.smSweepOf].pf.xle, 2) + " m" }],
       hlines: [0], zeroBase: false,
       fmtY: (y) => fmt(y, 1) + " %"
     });
     makeChart($("chartSpec"), {
-      title: "Incidence spectrum: raw gust vs felt at rear pair",
+      title: "Incidence spectrum: raw gust vs felt at " + (r.ctx.rear ? "rear pair" : "wing"),
       series: [
         { name: "Raw (w/V)²", cls: "s1", data: r.spectrum.map(p => ({ x: p.Om, y: p.raw })) },
-        { name: "Felt at rear pair", cls: "s2", data: r.spectrum.map(p => ({ x: p.Om, y: p.felt })) }
+        { name: "Felt at " + (r.ctx.rear ? "rear pair" : "wing"), cls: "s2", data: r.spectrum.map(p => ({ x: p.Om, y: p.felt })) }
       ],
       xLabel: "Spatial frequency Ω (rad/m)", yLabel: "PSD (rad²·m)", logX: true, logY: true,
       fmtY: (y) => y.toExponential(2)
@@ -687,7 +718,8 @@
       "Design: " + d.name,
       "Hull: L " + fmt(d.hullLength_m, 2) + " m, D " + fmt(d.hullDiameter_m, 3) + " m, CG " + fmt(d.xcg_m, 2) + " m from nose",
       "Front pair: S " + fmt(d.frontArea_m2, 3) + " m², AR " + fmt(d.frontAR, 2) + ", Λ " + fmt(d.frontSweepLE_deg, 0) + "°, λ " + fmt(d.frontTaper, 2) + ", apex x " + fmt(d.frontXle_m, 2) + " m" + (d.frontPlanform === "delta" ? " (delta)" : ""),
-      "Rear pair:  S " + fmt(d.rearArea_m2, 3) + " m², AR " + fmt(d.rearAR, 2) + ", Λ " + fmt(d.rearSweepLE_deg, 0) + "°, λ " + fmt(d.rearTaper, 2) + ", apex x " + fmt(d.rearXle_m, 2) + " m" + (d.rearPlanform === "delta" ? " (delta)" : "") + (d.cruciform ? " (cruciform)" : "") + (d.downwash === false ? " · downwash off" : ""),
+      "Rear pair:  S " + fmt(d.rearArea_m2, 3) + " m², AR " + fmt(d.rearAR, 2) + ", Λ " + fmt(d.rearSweepLE_deg, 0) + "°, λ " + fmt(d.rearTaper, 2) + ", apex x " + fmt(d.rearXle_m, 2) + " m" + (d.rearPlanform === "delta" ? " (delta)" : "") + (d.tailType === "vtail" ? ", Γ " + fmt(d.rearDihedral_deg, 0) + "°" : "") + (d.downwash === false ? " · downwash off" : ""),
+      "Tail: " + d.tailType + (d.finArea_m2 > 0 && (d.tailType === "traditional" || d.tailType === "tailless") ? " · fin S " + fmt(d.finArea_m2, 3) + " m², AR " + fmt(d.finAR, 2) + ", apex x " + fmt(d.finXle_m, 2) + " m" : ""),
       "Waterjet: " + fmt(d.maxPower_kW, 1) + " kW max, η_jet " + fmt(r.ctx.etaJet, 2) + ", nozzle " + fmt(d.nozzleDiameter_m * 1000, 0) + " mm, BSFC " + fmt(d.bsfc_kgpkWh, 2) + " kg/kWh",
       "Mass: m0 " + fmt(r.ctx.m0, 1) + " kg (fuel " + fmt(d.fuelMass_kg, 1) + " kg, payload " + fmt(state.payloadKg, 1) + " kg), reserve " + fmt(e.reserveFraction * 100, 0) + " %",
       "Water density " + fmt(e.density_kgpm3, 1) + " kg/m³ · cruise " + fmt(c.V, 2) + " m/s",
@@ -697,7 +729,7 @@
       "Best range: " + (r.best ? fmt(r.best.rangeKm, 1) + " km at " + fmt(r.best.V, 2) + " m/s" : "–") + " · max speed " + (r.vMax != null ? fmt(r.vMax, 2) + " m/s" : "–"),
       "Drag " + fmt(c.drag.total, 1) + " N · engine " + fmt(c.P_engine / 1000, 2) + " kW (" + fmt(c.throttle * 100, 0) + " %) · fuel " + fmt(c.fuelFlow_kgph, 2) + " kg/h",
       "Static margin " + fmt(r.staticMargin_m, 3) + " m (" + fmt(r.staticMargin_pct, 1) + " % L), NP " + fmt(r.xnp, 3) + " m",
-      "RMS gust incidence front/rear " + fmt(c.sv.sigFinAlpha[0] * DEG, 2) + "°/" + fmt(c.sv.sigFinAlpha[1] * DEG, 2) + "° · load factor 1 ± " + fmt(c.sv.sigL / r.ctx.W, 2),
+      "RMS gust incidence " + c.surfV.map(t => t.name + " " + fmt(t.sig * DEG, 2) + "°").join(" / ") + " · load factor 1 ± " + fmt(c.sv.sigL / r.ctx.W, 2),
       "Track wander per 1 km (depth/lateral): " + fmt(r.per1km.depth_m, 1) + " / " + fmt(r.per1km.lateral_m, 1) + " m",
       "Start point: " + (state.mapCenter ? fmt(state.mapCenter.lat, 4) + ", " + fmt(state.mapCenter.lng, 4) : "default"),
       "Warnings: " + (r.warnings.length ? r.warnings.join(" | ") : "none")
@@ -745,7 +777,7 @@
   function downloadTemplates() {
     const f = $("dlg_format").value || "json", delim = f === "tsv" ? "\t" : ";", ext = f === "tsv" ? "tsv" : "csv";
     if (f === "json") {
-      const blank = {}; Data.vehicleHeaders.forEach(h => blank[h] = ["cruciform", "downwash"].includes(h) ? true : (["id", "name", "type", "frontSection", "rearSection", "frontPlanform", "rearPlanform"].includes(h) ? "" : 0));
+      const blank = {}; Data.vehicleHeaders.forEach(h => blank[h] = h === "downwash" ? true : (["id", "name", "type", "tailType", "frontSection", "rearSection", "finSection", "frontPlanform", "rearPlanform"].includes(h) ? "" : 0));
       Data.download("template-vehicles.json", JSON.stringify([blank], null, 2), "application/json");
       Data.download("template-payloads.json", JSON.stringify([{ id: "", name: "", type: "", weightKg: 0 }], null, 2), "application/json");
     } else {
@@ -775,7 +807,7 @@
       buildVehicleSelect(); loadProfile(v); schedule();
       flash("Saved: " + name);
     });
-    on("cruciform", "change", () => { state.design.cruciform = $("cruciform").checked; schedule(); });
+    on("tailType", "change", () => { state.design.tailType = $("tailType").value; applyTailType(); schedule(); });
     on("downwash", "change", () => { state.design.downwash = $("downwash").checked; schedule(); });
     on("useVehicleResponse", "change", () => { state.env.useVehicleResponse = $("useVehicleResponse").checked; schedule(); });
     on("includeQPenalty", "change", () => { state.env.includeQPenalty = $("includeQPenalty").checked; schedule(); });

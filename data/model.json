@@ -31,7 +31,16 @@
     "rearSweepLE_deg": 0,
     "rearPlanform": "conventional",
     "rearHeight_m": 0,
+    "rearDihedral_deg": 35,
+    "finArea_m2": 0,
+    "finAR": 1.5,
+    "finSweepLE_deg": 35,
+    "finTaper": 0.5,
     "downwash": true
+  },
+  "verticalTail": {
+    "_note": "Effective aspect ratio of a single vertical fin = factor x geometric AR (h^2/S): endplate effect of fuselage and tailplane (Raymer, Aircraft Design, ~1.55 for conventional tails).",
+    "effectiveARFactor": 1.55
   },
   "delta": {
     "_note": "Polhamus leading-edge-suction analogy (NASA TN D-3767, 1966). Kv = vortex-lift factor: pi is the slender-wing limit; Polhamus' chart gives roughly 3-3.4 for AR 0.5-2.5 – check against the chart for your AR. stallAlphaDeg: vortex breakdown reaches the trailing edge; Polhamus overpredicts lift beyond it. 25 deg gives CLmax ~1.3-1.4 for a 60 deg delta, in line with test data.",

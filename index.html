@@ -50,12 +50,26 @@
     <div class="card design-box">
       <h2>3 · Control surfaces</h2>
       <p class="hint">Two pairs (e.g. wing + tail, or front + rear fins). Each pair's area S is the planform area of both halves together; span, root/tip chord and MAC follow from S, AR, taper and sweep. Positions are measured from the nose to each pair's root leading edge (apex); the aerodynamic centre is computed.</p>
-      <h3>Front pair</h3>
+      <label class="field">Tail configuration
+        <select id="tailType" class="input">
+          <option value="traditional">Traditional – horizontal tail + vertical fin</option>
+          <option value="vtail">V-tail – rear pair with dihedral Γ</option>
+          <option value="tailless">Tailless – wing only (elevon trim) + optional vertical fin</option>
+          <option value="cruciform">Cruciform (AUV) – both pairs also act in yaw</option>
+        </select>
+        <span class="hint" id="tailTypeHint"></span>
+      </label>
+      <h3 id="frontTitle">Front pair</h3>
       <div id="box_front"></div>
-      <h3>Rear pair</h3>
-      <div id="box_rear"></div>
-      <label class="check"><input id="cruciform" type="checkbox"> Cruciform – the same pairs also act in the vertical plane (yaw)</label>
-      <label class="check"><input id="downwash" type="checkbox"> Downwash from the front pair on the rear pair (DATCOM dε/dα, wake lag l_H/V)</label>
+      <div id="rearWrap">
+        <h3 id="rearTitle">Rear pair</h3>
+        <div id="box_rear"></div>
+        <label class="check"><input id="downwash" type="checkbox"> Downwash from the front pair on the rear pair (DATCOM dε/dα, wake lag l_H/V)</label>
+      </div>
+      <div id="finWrap">
+        <h3>Vertical fin</h3>
+        <div id="box_fin"></div>
+      </div>
     </div>
 
     <div class="card design-box">

@@ -75,6 +75,28 @@ conventional pair). Polhamus is valid for sharp, highly swept leading edges
 (Λ ≳ 45–50°) and overpredicts lift after vortex breakdown; a warning is shown
 below 45° sweep.
 
+### Tail configuration (`tailType`)
+
+| Option | Pitch plane | Yaw plane |
+|---|---|---|
+| `traditional` | wing + horizontal tail (rear pair) | vertical fin |
+| `vtail` | wing + rear pair, K·cos²Γ | rear pair, K·sin²Γ |
+| `tailless` | wing only – elevon trim assumed | vertical fin (optional) |
+| `cruciform` (AUV) | front + rear pair | front + rear pair (second identical pair) |
+
+* **Vertical fin** (single surface, height h, area S, AR_geo = h²/S): geometry from its
+  mirror-image pair; lift slope from `AR_eff = factor·AR_geo`
+  (`model.json → verticalTail.effectiveARFactor`, default 1.55 – endplate effect, Raymer).
+  Fin area 0 = no fin (yaw then unstable, warning).
+* **V-tail** (Purser–Campbell): each panel's normal force has a vertical share cos Γ and a
+  side share sin Γ, and a vertical/lateral gust gives panel incidence ·cos Γ / ·sin Γ, so
+  `K_pitch = q·S·CLα·cos²Γ`, `K_yaw = q·S·CLα·sin²Γ`. Panel CL at trim = `L_rear/(q·S·cos Γ)`
+  (used for induced drag and the stall check). S, AR and span are measured along the panels.
+* **Tailless**: the wing carries W; the pitching moment is assumed trimmed by elevons
+  (reflex) and **elevon trim drag is not modelled**. Static margin = neutral point (wing a.c.
+  with the hull Munk moment) − CG.
+* Old profiles: `cruciform: true` → `cruciform`; `cruciform: false` → `traditional` with fin area 0.
+
 ### Downwash on the rear pair
 
 DATCOM / Raymer low-speed downwash gradient from the front pair:
@@ -88,7 +110,10 @@ l_H = distance between the a.c.s, h_H = rear-pair height above the front-pair
 plane (input), b = front span. The last factor scales the wake for delta
 vortex lift. Capped at 0.95 (warning) when the tail sits too close behind the
 wing. Applied in the vertical plane only (no sidewash in yaw); can be switched
-off per design.
+off per design. The formula assumes the tail span lies inside the wing's vortex
+span – a warning is shown when the rear pair is wider than the front pair (typical
+AUV fins: there the outer tail sees upwash and dε/dα is overestimated; the bundled
+AUV profiles therefore have downwash off).
 The bundled coefficients are approximate literature-typical values; sections
 marked `rough` raise a warning. Verify against the cited source before using a
 result as justification.
@@ -187,11 +212,11 @@ Max speed = highest scanned speed where `P_engine ≤ P_max`.
 | 2 | Linear (small-angle) gust response; warning above `limits.maxGustAlphaDeg` | `model.js planeSystem` |
 | 3 | CG fixed during fuel burn; trim/L-D evaluated at m0 | `model.js analyze` |
 | 4 | Hull lift neglected (Munk moment kept); fin–hull interference ignored | `model.js pointAt` |
-| 5 | Same fin pairs used in yaw when cruciform | `design.cruciform` |
+| 5 | Cruciform reuses the same pairs in yaw; no roll axis (dihedral effect, spiral/Dutch roll) | `design.tailType` |
 | 6 | "Wind" on the map is the original tool's atmospheric placeholder (future: currents) | `model.js envelope` |
 | 7 | Pitch damping only from fins + optional extra term | `extraPitchDamping_Nms` |
 | 8 | ITTC-57 + Hoerner form factor for hull drag | calibration panel / `model.js` |
 | 9 | No compressibility; trapezoidal planforms only (no cranked/double delta); no wing–body carry-over | `model.js planform` |
 | 10 | Delta: Polhamus Kv and stall α are single global values | `data/model.json → delta` |
 | 11 | Downwash: DATCOM empirical formula, vertical plane only, no downwash lag in the eigenvalues | `model.js downwashGradient` |
-| 12 | No separate vertical tail – "cruciform" reuses the same pairs in yaw | `design.cruciform` |
+| 12 | Tailless: elevon trim drag and Cm0 (reflex) not modelled; V-tail: no panel interference | `model.js trim` |

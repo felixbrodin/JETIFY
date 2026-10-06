@@ -81,12 +81,14 @@ const Data = (() => {
   const vehicleNumeric = [
     "hullLength_m", "hullDiameter_m", "xcg_m", "volumeCoeff", "wettedCoeff", "pitchInertia_kgm2", "extraPitchDamping_Nms",
     "frontArea_m2", "frontAR", "frontXle_m", "frontSweepLE_deg", "frontTaper", "frontOswaldE",
-    "rearArea_m2", "rearAR", "rearXle_m", "rearSweepLE_deg", "rearTaper", "rearOswaldE", "rearHeight_m",
+    "rearArea_m2", "rearAR", "rearXle_m", "rearSweepLE_deg", "rearTaper", "rearOswaldE", "rearHeight_m", "rearDihedral_deg",
+    "finArea_m2", "finAR", "finXle_m", "finSweepLE_deg", "finTaper",
     "maxPower_kW", "jetEfficiency", "nozzleDiameter_m", "bsfc_kgpkWh", "emptyMass_kg", "fuelMass_kg"
   ];
-  // Section ids from data/sections.json; planform "conventional" | "delta" (blank = default).
-  const vehicleText = ["frontSection", "rearSection", "frontPlanform", "rearPlanform"];
-  const vehicleHeaders = ["id", "name", "type", ...vehicleNumeric, ...vehicleText, "cruciform", "downwash"];
+  // Section ids from data/sections.json; planform "conventional" | "delta";
+  // tailType "traditional" | "vtail" | "tailless" | "cruciform" (blank = default).
+  const vehicleText = ["tailType", "frontSection", "rearSection", "finSection", "frontPlanform", "rearPlanform"];
+  const vehicleHeaders = ["id", "name", "type", ...vehicleNumeric, ...vehicleText, "downwash"];
   const vehicleRequired = ["hullLength_m", "hullDiameter_m", "frontArea_m2", "rearArea_m2"];
   const payloadHeaders = ["id", "name", "type", "weightKg"];
 
@@ -95,13 +97,14 @@ const Data = (() => {
       id: String(row.id || "").trim() || "custom-" + Math.random().toString(36).slice(2, 8),
       name: String(row.name || "").trim() || "Unnamed vehicle",
       type: String(row.type || "").trim() || "custom",
-      cruciform: row.cruciform == null || row.cruciform === "" ? true : bool(row.cruciform),
       downwash: row.downwash == null || row.downwash === "" ? true : bool(row.downwash)
     };
     // Older files gave frontX_m / rearX_m (centre of lift); Model.normalizeDesign converts them.
     ["frontX_m", "rearX_m"].forEach(k => { if (num(row[k]) != null) v[k] = num(row[k]); });
     vehicleNumeric.forEach(k => { v[k] = num(row[k]); });
     vehicleText.forEach(k => { const t = String(row[k] == null ? "" : row[k]).trim(); if (t) v[k] = t; });
+    // Older files: a cruciform column instead of tailType (Model.normalizeDesign converts it).
+    if (!v.tailType) v.cruciform = row.cruciform == null || row.cruciform === "" ? true : bool(row.cruciform);
     if (v.extraPitchDamping_Nms == null) v.extraPitchDamping_Nms = 0;
     return v;
   }

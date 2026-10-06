@@ -189,8 +189,51 @@ test("downwash: plausible gradient for a conventional wing + tail, and it lowers
 test("delta wing + aft tail produces a finite result", () => {
   const v = { ...vehicles[0], hullLength_m: 1.2, hullDiameter_m: 0.09, xcg_m: 0.62, emptyMass_kg: 1.8, fuelMass_kg: 0.2,
     frontArea_m2: 0.3, frontAR: 2.3, frontTaper: 0, frontSweepLE_deg: 60, frontXle_m: 0.15, frontPlanform: "delta",
-    rearArea_m2: 0.06, rearAR: 4, rearTaper: 0.6, rearSweepLE_deg: 20, rearXle_m: 1.05, rearHeight_m: 0.05, cruciform: false };
+    rearArea_m2: 0.06, rearAR: 4, rearTaper: 0.6, rearSweepLE_deg: 20, rearXle_m: 1.05, rearHeight_m: 0.05, tailType: "traditional", finArea_m2: 0.02, finAR: 1.2, finSweepLE_deg: 40, finTaper: 0.4, finXle_m: 1.0 };
   const r = Model.analyze(v, envOf({ cruiseSpeed_mps: 20 }), model);
   assert.ok(r && Number.isFinite(r.staticMargin_m) && Number.isFinite(r.chosen.drag.total));
   assert.strictEqual(r.ctx.front.kind, "delta");
+});
+
+test("legacy cruciform flag maps to tail types", () => {
+  const { cruciform, tailType, ...v } = vehicles[0];
+  assert.strictEqual(Model.normalizeDesign({ ...v, cruciform: true }, model).tailType, "cruciform");
+  const t = Model.normalizeDesign({ ...v, cruciform: false }, model);
+  assert.strictEqual(t.tailType, "traditional");
+  assert.ok(!(t.finArea_m2 > 0), "legacy 'no vertical surfaces' must not gain a fin");
+});
+
+// Aircraft-like layout in air: wing + tail, CG near the wing a.c.
+const plane = { ...vehicles[0], hullLength_m: 1.2, hullDiameter_m: 0.1, xcg_m: 0.42, emptyMass_kg: 2, fuelMass_kg: 0.3,
+  frontArea_m2: 0.3, frontAR: 6, frontXle_m: 0.3, frontTaper: 0.6, frontSweepLE_deg: 5,
+  rearArea_m2: 0.06, rearAR: 4, rearXle_m: 1.0, rearTaper: 0.7, rearSweepLE_deg: 10, downwash: false,
+  finArea_m2: 0.025, finAR: 1.3, finXle_m: 0.98, finSweepLE_deg: 35, finTaper: 0.5 };
+const airEnv = envOf({ density_kgpm3: 1.225, kinematicViscosity_m2ps: 1.46e-5, cruiseSpeed_mps: 18 });
+
+test("traditional tail: the vertical fin gives a stable yaw mode; no fin → no yaw surfaces", () => {
+  const r = Model.analyze({ ...plane, tailType: "traditional" }, airEnv, model);
+  assert.ok(r.ctx.fin && r.chosen.hasYaw && r.chosen.lat.stable, "fin should stabilise yaw");
+  assert.ok(r.ctx.fin.AR > r.ctx.fin.ARgeo, "effective AR > geometric");
+  const n = Model.analyze({ ...plane, tailType: "traditional", finArea_m2: 0 }, airEnv, model);
+  assert.ok(!n.chosen.hasYaw && n.per1km.lateral_m === Infinity);
+});
+
+test("V-tail at 45° with twice the area matches a horizontal tail in pitch", () => {
+  const h = Model.analyze({ ...plane, tailType: "traditional", finArea_m2: 0 }, airEnv, model);
+  const v = Model.analyze({ ...plane, tailType: "vtail", rearDihedral_deg: 45, rearArea_m2: 2 * plane.rearArea_m2 }, airEnv, model);
+  // Same AR → same CLα; K_pitch = q·2S·CLα·cos²45° = q·S·CLα. Only the a.c. shifts (larger chord).
+  assert.ok(Math.abs(v.chosen.vert.La / h.chosen.vert.La - 1) < 0.02, v.chosen.vert.La + " vs " + h.chosen.vert.La);
+  assert.ok(v.chosen.hasYaw && v.chosen.lat.La > 0, "V-tail gives side force");
+  const c = v.chosen;
+  assert.ok(Math.abs(c.surfV[1].CL - c.split.Lr / (c.qbar * v.ctx.rear.area * Math.cos(Math.PI / 4))) < 1e-12, "panel CL = L_rear/(q·S·cosΓ)");
+});
+
+test("tailless: wing carries W, no downwash, static margin = wing a.c. vs CG", () => {
+  const r = Model.analyze({ ...plane, tailType: "tailless", downwash: true, xcg_m: 0.36 }, airEnv, model);
+  assert.strictEqual(r.ctx.rear, null);
+  assert.strictEqual(r.chosen.trim.dw.E, 0);
+  assert.ok(Math.abs(r.chosen.split.Lf - r.ctx.W) < 1e-9);
+  assert.strictEqual(r.smSweepOf, "front");
+  const fwd = Model.analyze({ ...plane, tailType: "tailless", xcg_m: 0.30 }, airEnv, model);
+  assert.ok(fwd.staticMargin_m > r.staticMargin_m, "moving CG forward increases the margin");
 });

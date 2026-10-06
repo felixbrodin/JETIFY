@@ -202,6 +202,68 @@
         "kind": "number",
         "step": 0.01,
         "digits": 3
+      },
+      {
+        "key": "rearDihedral_deg",
+        "label": "V-tail dihedral Γ (from horizontal)",
+        "unit": "°",
+        "kind": "slider",
+        "min": 5,
+        "max": 85,
+        "step": 0.5,
+        "digits": 1
+      }
+    ],
+    "fin": [
+      {
+        "key": "finArea_m2",
+        "label": "Fin area S_fin (single fin, 0 = none)",
+        "unit": "m²",
+        "kind": "slider",
+        "min": 0,
+        "max": 0.5,
+        "step": 0.001,
+        "digits": 3
+      },
+      {
+        "key": "finAR",
+        "label": "Fin aspect ratio h²/S (geometric)",
+        "unit": "",
+        "kind": "slider",
+        "min": 0.3,
+        "max": 4,
+        "step": 0.05,
+        "digits": 2
+      },
+      {
+        "key": "finXle_m",
+        "label": "Fin root leading edge x (from nose)",
+        "unit": "m",
+        "kind": "slider",
+        "min": 0,
+        "max": "hullLength_m",
+        "step": 0.01,
+        "digits": 2
+      },
+      {
+        "key": "finSweepLE_deg",
+        "label": "Fin leading-edge sweep Λ_LE",
+        "unit": "°",
+        "kind": "slider",
+        "min": 0,
+        "max": 80,
+        "step": 0.5,
+        "digits": 1
+      },
+      {
+        "key": "finTaper",
+        "label": "Fin taper ratio λ (c_tip/c_root)",
+        "unit": "",
+        "kind": "slider",
+        "min": 0,
+        "max": 1,
+        "step": 0.01,
+        "digits": 2
       }
     ],
     "propulsion": [
