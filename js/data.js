@@ -24,8 +24,9 @@ const Data = (() => {
     const variables = await read("data/variables.json");
     const vehicles = await read("data/vehicles.json");
     const payloads = await read("data/payloads.json");
+    const sections = await read("data/sections.json");   // optional: without it only the ideal 2π section exists
     const missing = [["model.json", model], ["variables.json", variables], ["vehicles.json", vehicles], ["payloads.json", payloads]].filter(([, v]) => !v).map(([n]) => n);
-    return { ok: !missing.length, missing, model, variables, vehicles: vehicles || [], payloads: payloads || [] };
+    return { ok: !missing.length, missing, model, variables, vehicles: vehicles || [], payloads: payloads || [], sections };
   }
 
   // ---------- CSV/TSV parsing (delimiter auto-detected) ----------
@@ -82,7 +83,8 @@ const Data = (() => {
     "frontArea_m2", "frontAR", "frontX_m", "rearArea_m2", "rearAR", "rearX_m",
     "maxPower_kW", "jetEfficiency", "nozzleDiameter_m", "bsfc_kgpkWh", "emptyMass_kg", "fuelMass_kg"
   ];
-  const vehicleHeaders = ["id", "name", "type", ...vehicleNumeric, "cruciform"];
+  const vehicleText = ["frontSection", "rearSection"];   // section ids from data/sections.json (blank = default)
+  const vehicleHeaders = ["id", "name", "type", ...vehicleNumeric, ...vehicleText, "cruciform"];
   const vehicleRequired = ["hullLength_m", "hullDiameter_m", "frontArea_m2", "rearArea_m2"];
   const payloadHeaders = ["id", "name", "type", "weightKg"];
 
@@ -94,6 +96,7 @@ const Data = (() => {
       cruciform: row.cruciform == null || row.cruciform === "" ? true : bool(row.cruciform)
     };
     vehicleNumeric.forEach(k => { v[k] = num(row[k]); });
+    vehicleText.forEach(k => { const t = String(row[k] == null ? "" : row[k]).trim(); if (t) v[k] = t; });
     if (v.extraPitchDamping_Nms == null) v.extraPitchDamping_Nms = 0;
     return v;
   }

@@ -30,10 +30,29 @@ Trim is evaluated at take-off mass m0 (as in the script).
 | Item | Relation |
 |---|---|
 | Pair span / chord | `b = √(S·AR)`, `c = √(S/AR)` (S = both fins of the pair) |
-| Lift slope | Helmbold `CLα = 2πAR/(2+√(AR²+4))` (script used fixed 4.5 – overridable in calibration) |
+| Lift slope | Generalised Helmbold (DATCOM, unswept, incompressible) `CLα = 2πAR/(2+√(AR²/κ²+4))`, `κ = cℓα/2π` from the selected 2D section (script used fixed 4.5 – overridable in calibration) |
 | Hull volume | `Vol = C_vol · πD²L/4` |
 | Hull wetted area | `S_wet = C_wet · πDL` |
 | Added mass / inertia | Lamb's k₁, k₂, k′ for a prolate spheroid of the same L/D |
+
+### 2D sections (`data/sections.json`)
+
+Each fin pair has its own section. A section stores data points
+(cℓα, cd_min, cℓmax) at chord Reynolds numbers; the model evaluates them at
+`Re_c = V_cruise·c/ν` (cruise speed, fixed over the speed scan), linear in
+log10 Re and clamped to the data range. The pair then uses
+
+```
+CLα   = Helmbold(AR, cℓα)
+CD0   = cd_min            (environment "Fin CD0" if null – the ideal 2π section)
+CLmax = 0.9·cℓmax         (Raymer, unswept; conservative for low-AR fins)
+```
+
+Not modelled: compressibility (Prandtl–Glauert, matters above M ≈ 0.3 in
+air), sweep, cd rise with cℓ away from the drag bucket, cavitation.
+The bundled coefficients are approximate literature-typical values; sections
+marked `rough` raise a warning. Verify against the cited source before using a
+result as justification.
 
 ## 3. Drag build-up
 
@@ -41,7 +60,7 @@ Trim is evaluated at take-off mass m0 (as in the script).
 D = D_hull + D_fin,profile + D_trim + D_gust,vert + D_gust,lat + D_extra
 D_hull        = q_p·S_wet·Cf(Re)·FF            Cf = 0.075/(log10 Re − 2)²   (ITTC-57)
                                                FF = 1 + 1.5/λ^1.5 + 7/λ³    (Hoerner)
-D_fin,profile = q_p·CD0·ΣS_i·(2 if cruciform)
+D_fin,profile = q_p·ΣCD0_i·S_i·(2 if cruciform)
 D_trim        = Σ q·S_i·CL_i²/(π·e·AR_i)
 D_gust        = Σ q·S_i·CLα_i²·σ²_α,i/(π·e·AR_i)        ← the script's turbulent drag growth
 ```

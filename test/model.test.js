@@ -105,3 +105,35 @@ test("variables.json: every field is well formed and every slider span contains 
     });
   });
 });
+
+test("generalised Helmbold: a0 = 2π gives the classic form, large AR tends to a0", () => {
+  const AR = 3;
+  assert.ok(Math.abs(I.helmbold(AR) - 2 * Math.PI * AR / (2 + Math.sqrt(AR * AR + 4))) < 1e-12);
+  assert.ok(Math.abs(I.helmbold(AR, 2 * Math.PI) - I.helmbold(AR)) < 1e-12);
+  assert.ok(Math.abs(I.helmbold(1e5, 5.7) / 5.7 - 1) < 1e-3);
+  assert.ok(I.helmbold(AR, 5.7) < I.helmbold(AR));
+});
+
+test("section data: log-Re interpolation and clamping", () => {
+  const sec = { points: [{ Re: 1e5, clAlpha_perRad: 5, cdMin: 0.01, clMax: 1 }, { Re: 1e7, clAlpha_perRad: 7, cdMin: null, clMax: 2 }] };
+  const mid = I.sectionAt(sec, 1e6);
+  assert.ok(Math.abs(mid.clAlpha - 6) < 1e-12 && Math.abs(mid.clMax - 1.5) < 1e-12 && mid.cdMin === null);
+  assert.strictEqual(I.sectionAt(sec, 1e3).clAlpha, 5);
+  assert.strictEqual(I.sectionAt(sec, 1e9).clAlpha, 7);
+});
+
+test("sections.json is valid and the ideal section reproduces the old model", () => {
+  const sections = JSON.parse(fs.readFileSync(path.join(__dirname, "../data/sections.json"), "utf8"));
+  assert.ok(sections.sections.some(s => s.id === sections.default));
+  sections.sections.forEach(s => {
+    assert.ok(s.id && s.name && s.points.length, s.id);
+    s.points.forEach(p => assert.ok(p.Re > 0 && p.clAlpha_perRad > 0, s.id));
+  });
+  const v = vehicles[0], env = envOf({});
+  const old = Model.analyze(v, env, model);
+  const withIdeal = Model.analyze({ ...v, frontSection: "ideal", rearSection: "ideal" }, env, { ...model, sections });
+  assert.ok(Math.abs(withIdeal.chosen.rangeKm / old.chosen.rangeKm - 1) < 1e-12);
+  const n12 = Model.analyze({ ...v, frontSection: "naca0012", rearSection: "naca0012" }, env, { ...model, sections });
+  assert.ok(n12.ctx.rear.clAlpha < old.ctx.rear.clAlpha, "real section has a lower slope than 2π");
+  assert.notStrictEqual(n12.ctx.rear.cd0, env.finCD0);
+});

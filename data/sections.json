@@ -1,0 +1,119 @@
+{
+  "_readme": [
+    "Jetify – 2D wing/fin sections. Edit freely; reload the page (no code changes needed).",
+    "Each section has one or more data points at a chord Reynolds number Re. Between points the model",
+    "interpolates linearly in log10(Re); outside the range the nearest point is used (no extrapolation).",
+    "clAlpha_perRad = 2D lift-curve slope, cdMin = minimum section drag (per planform area), clMax = 2D max lift.",
+    "null for cdMin / clMax = use the environment values 'Fin profile drag CD0' / 'Fin CLmax'.",
+    "IMPORTANT: the values below are APPROXIMATE, literature-typical numbers entered from memory, not",
+    "digitised from the sources. Check each value against the cited source before using it to justify a design.",
+    "confidence: 'typical' = well-documented section, value should be within a few %; 'rough' = sparse data,",
+    "especially at low Re – treat as an order-of-magnitude placeholder."
+  ],
+  "default": "ideal",
+  "sections": [
+    {
+      "id": "ideal",
+      "name": "Ideal thin airfoil (2π)",
+      "family": "theory",
+      "thickness_pct": 0,
+      "points": [
+        { "Re": 1e6, "clAlpha_perRad": 6.283185307179586, "cdMin": null, "clMax": null }
+      ],
+      "confidence": "typical",
+      "source": "Thin-airfoil theory (Anderson, Fundamentals of Aerodynamics, ch. 4)",
+      "note": "Previous Jetify behaviour. CD0 and CLmax come from the environment inputs."
+    },
+    {
+      "id": "naca0006",
+      "name": "NACA 0006",
+      "family": "NACA 4-digit symmetric",
+      "thickness_pct": 6,
+      "points": [
+        { "Re": 2e5, "clAlpha_perRad": 5.5, "cdMin": 0.0095, "clMax": 0.70 },
+        { "Re": 6e6, "clAlpha_perRad": 6.2, "cdMin": 0.0050, "clMax": 0.85 }
+      ],
+      "confidence": "typical",
+      "source": "Abbott & von Doenhoff, Theory of Wing Sections (1959), App. IV; low Re: UIUC LSATs / airfoiltools.com (XFOIL)",
+      "note": "Thin: sharp leading-edge stall at low Re."
+    },
+    {
+      "id": "naca0009",
+      "name": "NACA 0009",
+      "family": "NACA 4-digit symmetric",
+      "thickness_pct": 9,
+      "points": [
+        { "Re": 2e5, "clAlpha_perRad": 5.6, "cdMin": 0.0095, "clMax": 0.80 },
+        { "Re": 6e6, "clAlpha_perRad": 6.25, "cdMin": 0.0052, "clMax": 1.30 }
+      ],
+      "confidence": "typical",
+      "source": "Abbott & von Doenhoff (1959), App. IV; low Re: UIUC LSATs / airfoiltools.com (XFOIL)",
+      "note": "Common RC tail section."
+    },
+    {
+      "id": "naca0012",
+      "name": "NACA 0012",
+      "family": "NACA 4-digit symmetric",
+      "thickness_pct": 12,
+      "points": [
+        { "Re": 2e5, "clAlpha_perRad": 5.7, "cdMin": 0.0105, "clMax": 0.95 },
+        { "Re": 6e6, "clAlpha_perRad": 6.2, "cdMin": 0.0058, "clMax": 1.55 }
+      ],
+      "confidence": "typical",
+      "source": "Abbott & von Doenhoff (1959), App. IV; low Re: Sheldahl & Klimas, SAND80-2114 (1981)",
+      "note": "Recommended baseline for AUV fins."
+    },
+    {
+      "id": "naca64a010",
+      "name": "NACA 64A010",
+      "family": "NACA 6A-series symmetric",
+      "thickness_pct": 10,
+      "points": [
+        { "Re": 2e5, "clAlpha_perRad": 5.6, "cdMin": 0.0100, "clMax": 0.80 },
+        { "Re": 6e6, "clAlpha_perRad": 6.3, "cdMin": 0.0042, "clMax": 1.15 }
+      ],
+      "confidence": "rough",
+      "source": "Abbott & von Doenhoff (1959), App. IV (high Re); low Re: XFOIL estimate",
+      "note": "Laminar drag bucket only at high Re and smooth surface; at RC Re it behaves like a thin 4-digit."
+    },
+    {
+      "id": "naca16012",
+      "name": "NACA 16-012",
+      "family": "NACA 16-series symmetric",
+      "thickness_pct": 12,
+      "points": [
+        { "Re": 2e5, "clAlpha_perRad": 5.6, "cdMin": 0.0100, "clMax": 0.85 },
+        { "Re": 6e6, "clAlpha_perRad": 6.1, "cdMin": 0.0045, "clMax": 1.05 }
+      ],
+      "confidence": "rough",
+      "source": "Lindsey, Stevenson & Daley, NACA TN-1546 (1948); low Re: XFOIL estimate",
+      "note": "Flat pressure distribution – used for propellers/hydrofoils to delay cavitation."
+    },
+    {
+      "id": "naca66012",
+      "name": "NACA 66-012",
+      "family": "NACA 6-series symmetric",
+      "thickness_pct": 12,
+      "points": [
+        { "Re": 2e5, "clAlpha_perRad": 5.5, "cdMin": 0.0110, "clMax": 0.85 },
+        { "Re": 6e6, "clAlpha_perRad": 6.1, "cdMin": 0.0038, "clMax": 1.15 }
+      ],
+      "confidence": "rough",
+      "source": "Abbott & von Doenhoff (1959), App. IV (high Re); low Re: XFOIL estimate",
+      "note": "Max thickness ~45 % chord; marine use for cavitation resistance."
+    },
+    {
+      "id": "sc2-0010",
+      "name": "NASA SC(2)-0010 (symmetric supercritical)",
+      "family": "NASA supercritical",
+      "thickness_pct": 10,
+      "points": [
+        { "Re": 2e5, "clAlpha_perRad": 5.5, "cdMin": 0.0110, "clMax": 0.80 },
+        { "Re": 6e6, "clAlpha_perRad": 6.2, "cdMin": 0.0060, "clMax": 1.20 }
+      ],
+      "confidence": "rough",
+      "source": "Harris, NASA TP-2969 (1990) – coordinates; coefficients are rough estimates",
+      "note": "Benefit is transonic wave drag only (M ≈ 0.7–0.8); no advantage at RC or AUV speeds."
+    }
+  ]
+}

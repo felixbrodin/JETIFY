@@ -259,7 +259,7 @@
       <ul class="notes-list">
         <li>Static balance as in the MATLAB reference: lift = weight (m0·g), split between the pairs by moment balance about CG. Buoyancy is deliberately excluded (handled separately).</li>
         <li>Gust drag penalty: E[CL²] = CL<sub>trim</sub>² + CLα²·σ<sub>α</sub>², with σ<sub>α</sub> from integrating the von Kármán spectrum in the frequency domain (fin-chord averaging, fore/aft delay, optional rigid-body response). Fixed-attitude mode reproduces the script.</li>
-        <li>Hull drag: ITTC-57 friction × Hoerner form factor on wetted area. Fin lift slope from AR (Helmbold) unless calibrated.</li>
+        <li>Hull drag: ITTC-57 friction × Hoerner form factor on wetted area. Fin lift slope from AR and the selected 2D section (generalised Helmbold) unless calibrated; section CD0/CLmax from data/sections.json at the fin chord Re.</li>
         <li>Waterjet momentum theory; η<sub>jet</sub> converts engine power to jet-stream power. Range by Breguet with fuel burn (BSFC); equivalent to the script's V/c·L/D·ln(m0/mf).</li>
         <li>Trajectory: linear pitch/heave and yaw/sway with added mass (Lamb), hull Munk moment, Froude–Krylov force; no steering.</li>
         <li>Quasi-steady; CG fixed during fuel burn; trim evaluated at m0. Full derivation: <code>docs/MODEL.md</code>. All coefficients live in <code>data/model.json</code>.</li>

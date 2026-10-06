@@ -50,6 +50,7 @@
       return;
     }
     state.model = res.model;
+    state.model.sections = res.sections;
     state.vars = res.variables;
     try {
       state.model.presets = Model.presetsFromVariables(state.vars);
@@ -148,10 +149,39 @@
   function renderDesignBoxes() {
     renderFields("hull", "box_hull", "design");
     renderFields("front", "box_front", "design");
+    renderSectionSelect("frontSection", "box_front");
     renderFields("rear", "box_rear", "design");
+    renderSectionSelect("rearSection", "box_rear");
     renderFields("propulsion", "box_propulsion", "design");
     $("cruciform").checked = !!state.design.cruciform;
   }
+  // 2D section (airfoil) picker – options come from data/sections.json.
+  function renderSectionSelect(key, containerId) {
+    const sc = state.model.sections;
+    const list = (sc && sc.sections) || [];
+    if (!list.length) return;
+    const lab = document.createElement("label");
+    lab.className = "field"; lab.htmlFor = "f_" + key;
+    const title = document.createElement("span");
+    title.textContent = "2D section (airfoil)";
+    const sel = document.createElement("select");
+    sel.id = "f_" + key; sel.className = "input";
+    list.forEach(x => {
+      const o = document.createElement("option");
+      o.value = x.id; o.textContent = x.name + (x.confidence === "rough" ? " – rough data" : "");
+      sel.appendChild(o);
+    });
+    if (!list.some(x => x.id === state.design[key])) state.design[key] = sc.default || list[0].id;
+    sel.value = state.design[key];
+    const info = document.createElement("span");
+    info.className = "hint"; info.id = "f_" + key + "_info";
+    const describe = () => { const x = list.find(y => y.id === sel.value); info.textContent = x ? (x.note ? x.note + " " : "") + "Source: " + x.source : ""; };
+    describe();
+    sel.addEventListener("change", () => { state.design[key] = sel.value; describe(); schedule(); });
+    lab.appendChild(title); lab.appendChild(sel); lab.appendChild(info);
+    $(containerId).appendChild(lab);
+  }
+
   function renderEnvBoxes() {
     renderFields("environment", "box_environment", "env");
     renderFields("turbulence", "box_turbulence", "turb");
@@ -247,9 +277,11 @@
 
   function fillCalibTheory() {
     if (!state.design) return;
-    const AR = (a) => 2 * Math.PI * a / (2 + Math.sqrt(a * a + 4));
-    $("cc_claf").textContent = fmt(AR(state.design.frontAR), 2);
-    $("cc_clar").textContent = fmt(AR(state.design.rearAR), 2);
+    // Theory = Helmbold with the selected section's cℓα (ignoring any active override).
+    const r = state.last, I = Model._internal;
+    const theory = (n) => r ? I.helmbold(state.design[n + "AR"], r.ctx[n].section.a0) : I.helmbold(state.design[n + "AR"]);
+    $("cc_claf").textContent = fmt(theory("front"), 2);
+    $("cc_clar").textContent = fmt(theory("rear"), 2);
     $("cc_eta").textContent = fmt(state.design.jetEfficiency, 2);
     $("cc_extra").textContent = fmt(state.model.hydro.extraDragArea_m2 || 0, 4);
   }

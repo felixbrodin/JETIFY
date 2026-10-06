@@ -260,7 +260,7 @@
       },
       {
         "key": "finCD0",
-        "label": "Fin profile drag CD0 (per planform area)",
+        "label": "Fin profile drag CD0 (ideal section only)",
         "unit": "",
         "kind": "number",
         "step": 0.001,
@@ -268,7 +268,7 @@
       },
       {
         "key": "finCLmax",
-        "label": "Fin CLmax (stall check)",
+        "label": "Fin CLmax (ideal section only)",
         "unit": "",
         "kind": "number",
         "step": 0.05,

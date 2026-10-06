@@ -94,14 +94,39 @@ const Model = (() => {
   }
 
   // ---------- Control-surface pairs ----------
-  // Helmbold low-AR lift-curve slope [1/rad].
-  const helmbold = (AR) => 2 * Math.PI * AR / (2 + Math.sqrt(AR * AR + 4));
+  // Generalised Helmbold low-AR lift-curve slope [1/rad] (DATCOM, unswept, incompressible).
+  // a0 = 2D section slope; κ = a0/2π. With a0 = 2π this is the classic 2πAR/(2+√(AR²+4)).
+  const helmbold = (AR, a0) => {
+    const k = (a0 != null ? a0 : 2 * Math.PI) / (2 * Math.PI);
+    return 2 * Math.PI * AR / (2 + Math.sqrt(AR * AR / (k * k) + 4));
+  };
 
-  function finPair(area, AR, xcl, clAlphaOverride) {
+  // 2D section data at chord Reynolds number Re: linear in log10(Re), clamped to the data range.
+  function sectionAt(sec, Re) {
+    const pts = sec.points.slice().sort((a, b) => a.Re - b.Re);
+    const pick = (p) => ({ clAlpha: p.clAlpha_perRad, cdMin: p.cdMin, clMax: p.clMax });
+    if (pts.length === 1 || !(Re > pts[0].Re)) return pick(pts[0]);
+    if (Re >= pts[pts.length - 1].Re) return pick(pts[pts.length - 1]);
+    const i = pts.findIndex(p => p.Re > Re), a = pts[i - 1], b = pts[i];
+    const t = (Math.log10(Re) - Math.log10(a.Re)) / (Math.log10(b.Re) - Math.log10(a.Re));
+    const lerp = (x, y) => x == null || y == null ? null : x + t * (y - x);
+    return { clAlpha: lerp(a.clAlpha_perRad, b.clAlpha_perRad), cdMin: lerp(a.cdMin, b.cdMin), clMax: lerp(a.clMax, b.clMax) };
+  }
+
+  // 3D CLmax ≈ 0.9·cℓmax (Raymer, unswept); conservative for low-AR fins, which stall later.
+  const CLMAX_3D = 0.9;
+
+  // sec = section object from data/sections.json (or null = ideal 2π, environment CD0/CLmax).
+  function finPair(area, AR, xcl, clAlphaOverride, sec, V, nu, envCD0, envCLmax) {
     const span = Math.sqrt(area * AR);
     const chord = Math.sqrt(area / AR);
-    const clAlpha = clAlphaOverride != null ? clAlphaOverride : helmbold(AR);
-    return { area, AR, xcl, span, chord, clAlpha, clAlphaSrc: clAlphaOverride != null ? "empirical" : "Helmbold(AR)" };
+    const Re = V > 0 && nu > 0 ? V * chord / nu : null;
+    const s2 = sec ? sectionAt(sec, Re) : { clAlpha: 2 * Math.PI, cdMin: null, clMax: null };
+    const clAlpha = clAlphaOverride != null ? clAlphaOverride : helmbold(AR, s2.clAlpha);
+    const cd0 = s2.cdMin != null ? s2.cdMin : envCD0;
+    const clMax = s2.clMax != null ? CLMAX_3D * s2.clMax : envCLmax;
+    const section = { id: sec ? sec.id : "ideal", name: sec ? sec.name : "Ideal thin airfoil (2π)", confidence: sec ? sec.confidence : "typical", Re, a0: s2.clAlpha, cdMin: s2.cdMin, clMax2D: s2.clMax };
+    return { area, AR, xcl, span, chord, clAlpha, cd0, clMax, section, clAlphaSrc: clAlphaOverride != null ? "empirical" : "Helmbold(AR, a0)" };
   }
 
   // ---------- Waterjet ----------
@@ -229,8 +254,12 @@ const Model = (() => {
     const g = ph.gravity_mps2;
     const rho = env.density_kgpm3;
     const hull = hullGeometry(design);
-    const front = finPair(design.frontArea_m2, design.frontAR, design.frontX_m, c.clAlphaFront);
-    const rear = finPair(design.rearArea_m2, design.rearAR, design.rearX_m, c.clAlphaRear);
+    // Section data evaluated at the fin chord Re for the cruise speed (fixed over the speed scan).
+    const secs = (model.sections && model.sections.sections) || [];
+    const secOf = (id) => secs.find(x => x.id === (id || (model.sections && model.sections.default) || "ideal")) || null;
+    const fp = (area, AR, x, ov, id) => finPair(area, AR, x, ov, secOf(id), env.cruiseSpeed_mps, env.kinematicViscosity_m2ps, env.finCD0, env.finCLmax);
+    const front = fp(design.frontArea_m2, design.frontAR, design.frontX_m, c.clAlphaFront, design.frontSection);
+    const rear = fp(design.rearArea_m2, design.rearAR, design.rearX_m, c.clAlphaRear, design.rearSection);
     const m0 = design.emptyMass_kg + (env.payload_kg || 0) + design.fuelMass_kg;
     const mEnd = m0 - design.fuelMass_kg * (1 - env.reserveFraction);
     const W = m0 * g;
@@ -245,7 +274,7 @@ const Model = (() => {
     const etaJet = c.etaJet != null ? c.etaJet : design.jetEfficiency;
     return {
       g, rho, hull, front, rear, m0, mEnd, W, xcg, I0, Iadd, mAdd, An, etaJet,
-      e: env.oswaldE, cd0Fin: env.finCD0, clMax: env.finCLmax, nu: env.kinematicViscosity_m2ps,
+      e: env.oswaldE, nu: env.kinematicViscosity_m2ps,
       extraDragArea: (c.extraDragArea_m2 != null ? c.extraDragArea_m2 : (hy.extraDragArea_m2 || 0)),
       hullCDwetOverride: c.hullCDwet != null ? c.hullCDwet : null,
       cruciform: !!design.cruciform,
@@ -310,7 +339,8 @@ const Model = (() => {
     const CDwet = ctx.hullCDwetOverride != null ? ctx.hullCDwetOverride : Cf * ctx.hull.formFactor;
     const D_hull = qPar * ctx.hull.wetted * CDwet;
     const planes = ctx.cruciform ? 2 : 1;
-    const D_finProfile = qPar * ctx.cd0Fin * (ctx.front.area + ctx.rear.area) * planes;
+    const finCD0A = ctx.front.cd0 * ctx.front.area + ctx.rear.cd0 * ctx.rear.area;
+    const D_finProfile = qPar * finCD0A * planes;
     const ind = (pair, CL) => qbar * pair.area * CL * CL / (Math.PI * ctx.e * pair.AR);
     const D_trim = ind(ctx.front, CLf) + ind(ctx.rear, CLr);
     const gust = (pair, sig) => qbar * pair.area * pair.clAlpha * pair.clAlpha * sig * sig / (Math.PI * ctx.e * pair.AR);
@@ -318,7 +348,7 @@ const Model = (() => {
     const D_gustL = sl ? gust(ctx.front, sl.sigFinAlpha[0]) + gust(ctx.rear, sl.sigFinAlpha[1]) : 0;
     const D_extra = qPar * ctx.extraDragArea;
     const D = D_hull + D_finProfile + D_trim + D_gustV + D_gustL + D_extra;
-    const D_calm = qbar * ctx.hull.wetted * CDwet + qbar * ctx.cd0Fin * (ctx.front.area + ctx.rear.area) * planes + D_trim + qbar * ctx.extraDragArea;
+    const D_calm = qbar * ctx.hull.wetted * CDwet + qbar * finCD0A * planes + D_trim + qbar * ctx.extraDragArea;
 
     // Propulsion
     const jet = jetForThrust(D, V, ctx.rho, ctx.An);
@@ -445,8 +475,18 @@ const Model = (() => {
     if (chosen.CLf < 0 || chosen.CLr < 0)
       warnings.push(`CG (${round(ctx.xcg, 2)} m) lies outside the fin pairs – one pair carries negative lift (CL_front ${round(chosen.CLf, 3)}, CL_rear ${round(chosen.CLr, 3)}).`);
     [["front", chosen.CLf, chosen.sv.sigFinAlpha[0], ctx.front], ["rear", chosen.CLr, chosen.sv.sigFinAlpha[1], ctx.rear]].forEach(([n, CL, s, pair]) => {
-      if (Math.abs(CL) + 2 * pair.clAlpha * s > ctx.clMax)
-        warnings.push(`The ${n} pair reaches CL ≈ ${round(Math.abs(CL) + 2 * pair.clAlpha * s, 2)} in 2σ gusts (CLmax ${ctx.clMax}) – risk of stall/ventilation.`);
+      if (Math.abs(CL) + 2 * pair.clAlpha * s > pair.clMax)
+        warnings.push(`The ${n} pair reaches CL ≈ ${round(Math.abs(CL) + 2 * pair.clAlpha * s, 2)} in 2σ gusts (CLmax ${round(pair.clMax, 2)}, ${pair.section.name}) – risk of stall/ventilation.`);
+    });
+    [["front", ctx.front], ["rear", ctx.rear]].forEach(([n, pair]) => {
+      const q = pair.section, sec = ((model.sections && model.sections.sections) || []).find(x => x.id === q.id);
+      if (q.confidence === "rough")
+        warnings.push(`The ${n} section (${q.name}) uses ROUGH placeholder coefficients – verify against the cited source in data/sections.json before using the result as justification.`);
+      if (sec && sec.points.length > 1 && q.Re != null) {
+        const lo = Math.min(...sec.points.map(p => p.Re)), hi = Math.max(...sec.points.map(p => p.Re));
+        if (q.Re < lo || q.Re > hi)
+          warnings.push(`The ${n} fin chord Re ≈ ${q.Re.toExponential(1)} is outside the ${q.name} data (${lo.toExponential(0)}–${hi.toExponential(0)}); the nearest data point is used. Check the kinematic viscosity (water ≈ 1.3e-6, air ≈ 1.5e-5 m²/s).`);
+      }
     });
     [["Front", ctx.front.xcl], ["Rear", ctx.rear.xcl], ["CG", ctx.xcg]].forEach(([n, x]) => {
       if (x < 0 || x > ctx.hull.L) warnings.push(`${n} position ${round(x, 2)} m is outside the hull (0–${round(ctx.hull.L, 2)} m).`);
@@ -458,7 +498,7 @@ const Model = (() => {
     const steps = [
       { t: "Mass", d: `m0 = ${round(ctx.m0, 2)} kg (empty ${round(design.emptyMass_kg, 2)} + payload ${round(env.payload_kg || 0, 2)} + fuel ${round(design.fuelMass_kg, 2)}); m_end = ${round(ctx.mEnd, 2)} kg (reserve ${round(env.reserveFraction * 100, 0)} % of fuel)` },
       { t: "Hull", d: `L/D = ${round(ctx.hull.lam, 2)}, S_wet = ${round(ctx.hull.wetted, 3)} m², Vol = ${round(ctx.hull.volume * 1000, 1)} L, Re = ${chosen.Re.toExponential(2)}, Cf = ${round(chosen.Cf, 5)}, FF = ${round(ctx.hull.formFactor, 3)}` },
-      { t: "Fins", d: `front: b = ${round(ctx.front.span, 3)} m, c = ${round(ctx.front.chord, 3)} m, CLα = ${round(ctx.front.clAlpha, 2)}/rad · rear: b = ${round(ctx.rear.span, 3)} m, c = ${round(ctx.rear.chord, 3)} m, CLα = ${round(ctx.rear.clAlpha, 2)}/rad` },
+      { t: "Fins", d: ["front", "rear"].map(n => { const p = ctx[n], q = p.section; return `${n}: ${q.name}, b = ${round(p.span, 3)} m, c = ${round(p.chord, 3)} m, Re_c = ${q.Re != null ? q.Re.toExponential(2) : "–"}, cℓα = ${round(q.a0, 2)} → CLα = ${round(p.clAlpha, 2)}/rad, CD0 = ${round(p.cd0, 4)}, CLmax = ${round(p.clMax, 2)}`; }).join(" · ") },
       { t: "Static balance (L = W)", d: `q = ${round(chosen.qbar, 0)} Pa · L_front = ${round(chosen.split.Lf, 1)} N (CL ${round(chosen.CLf, 3)}), L_rear = ${round(chosen.split.Lr, 1)} N (CL ${round(chosen.CLr, 3)})` },
       { t: "Gust incidence (freq. domain)", d: `σ_α front ${round(chosen.sv.sigFinAlpha[0] * DEG, 2)}°, rear ${round(chosen.sv.sigFinAlpha[1] * DEG, 2)}° (${chosen.useDynV ? "with vehicle response" : "fixed attitude, as script"})` },
       { t: "Drag build-up", d: `hull ${round(D.hull, 1)} + fin profile ${round(D.finProfile, 1)} + trim induced ${round(D.trim, 1)} + gust (vert) ${round(D.gustV, 1)} + gust (lat) ${round(D.gustL, 1)} + extra ${round(D.extra, 1)} = ${round(D.total, 1)} N` },
@@ -510,7 +550,7 @@ const Model = (() => {
   return {
     analyze, envelope, round, presetsFromVariables,
     // exposed for tests / docs
-    _internal: { phiLongitudinal, phiTransverse, logGrid, lambCoefficients, helmbold, jetForThrust, thrustForJetPower, ittcCf, hullGeometry, planeSystem, planeStats }
+    _internal: { phiLongitudinal, phiTransverse, logGrid, lambCoefficients, helmbold, sectionAt, finPair, jetForThrust, thrustForJetPower, ittcCf, hullGeometry, planeSystem, planeStats }
   };
 })();
 
