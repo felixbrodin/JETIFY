@@ -207,11 +207,11 @@ test("legacy cruciform flag maps to tail types", () => {
 const plane = { ...vehicles[0], hullLength_m: 1.2, hullDiameter_m: 0.1, xcg_m: 0.42, emptyMass_kg: 2, fuelMass_kg: 0.3,
   frontArea_m2: 0.3, frontAR: 6, frontXle_m: 0.3, frontTaper: 0.6, frontSweepLE_deg: 5,
   rearArea_m2: 0.06, rearAR: 4, rearXle_m: 1.0, rearTaper: 0.7, rearSweepLE_deg: 10, downwash: false,
-  finArea_m2: 0.025, finAR: 1.3, finXle_m: 0.98, finSweepLE_deg: 35, finTaper: 0.5 };
+  finArea_m2: 0.025, finAR: 1.3, finXle_m: 0.98, finSweepLE_deg: 35, finTaper: 0.5, rollFree: true };
 const airEnv = envOf({ density_kgpm3: 1.225, kinematicViscosity_m2ps: 1.46e-5, cruiseSpeed_mps: 18 });
 
 test("traditional tail: the vertical fin gives a stable yaw mode; no fin → no yaw surfaces", () => {
-  const r = Model.analyze({ ...plane, tailType: "traditional" }, airEnv, model);
+  const r = Model.analyze({ ...plane, tailType: "traditional", frontDihedral_deg: 6 }, airEnv, model);
   assert.ok(r.ctx.fin && r.chosen.hasYaw && r.chosen.lat.stable, "fin should stabilise yaw");
   assert.ok(r.ctx.fin.AR > r.ctx.fin.ARgeo, "effective AR > geometric");
   const n = Model.analyze({ ...plane, tailType: "traditional", finArea_m2: 0 }, airEnv, model);
@@ -236,4 +236,37 @@ test("tailless: wing carries W, no downwash, static margin = wing a.c. vs CG", (
   assert.strictEqual(r.smSweepOf, "front");
   const fwd = Model.analyze({ ...plane, tailType: "tailless", xcg_m: 0.30 }, airEnv, model);
   assert.ok(fwd.staticMargin_m > r.staticMargin_m, "moving CG forward increases the margin");
+});
+
+test("lateral helpers: characteristic polynomial roots and strip-theory roll derivatives", () => {
+  const A = [[-1, 0, 0, 0], [0, -2, 3, 0], [0, -3, -2, 0], [0, 0, 0, -0.01]];
+  const r = I.polyRoots(I.charPoly(A)).map(e => [Math.round(e.re * 1e6) / 1e6, Math.round(Math.abs(e.im) * 1e6) / 1e6].join()).sort();
+  assert.deepStrictEqual(r, ["-0.01,0", "-1,0", "-2,3", "-2,3"]);
+  // Rectangular wing (λ = 1): C_lp = −a/6, C_lβ(Γ) = −a·Γ/4.
+  const pair = { area: 0.3, cd0: 0.01, pf: I.planform(0.3, 6, 1, 0, 0) };
+  const a = 4.5, q = 200, V = 18, b = pair.pf.b, G = 0.1;
+  const d = I.pairRollDerivs(pair, a, 0, G, q, V);
+  assert.ok(Math.abs(d.Lp / (q * 0.3 * b * b / (2 * V)) + a / 6) < 1e-9, "C_lp");
+  assert.ok(Math.abs(d.Lb / (q * 0.3 * b) + a * G / 4) < 1e-9, "C_lβ");
+});
+
+test("roll axis: dihedral stabilises the spiral, roll-locked AUVs keep the yaw/sway model", () => {
+  const r0 = Model.analyze({ ...plane, tailType: "traditional", frontDihedral_deg: 0 }, airEnv, model);
+  const r6 = Model.analyze({ ...plane, tailType: "traditional", frontDihedral_deg: 6 }, airEnv, model);
+  assert.ok(r6.lateralStatic.Clb < r0.lateralStatic.Clb, "dihedral → more negative C_lβ");
+  assert.ok(r6.chosen.lat.spiral.lambda < r0.chosen.lat.spiral.lambda, "spiral more stable");
+  assert.ok(r6.chosen.lat.dutch && r6.chosen.lat.roll && r6.chosen.lat.roll.tau > 0);
+  assert.ok(r0.lateralStatic.Cnb > 0, "fin gives weathercock stability");
+  const auv = Model.analyze(vehicles[0], envOf({}), model);
+  assert.strictEqual(auv.ctx.rollFree, false);
+  assert.ok(auv.chosen.lat.roll === null && auv.chosen.lat.spiral === null);
+  assert.ok(Number.isFinite(auv.per1km.lateral_m), "roll-locked AUV keeps a finite lateral wander");
+});
+
+test("rolling gust: wander measured from the initial course stays finite and grows with distance", () => {
+  const r = Model.analyze({ ...plane, tailType: "traditional", frontDihedral_deg: 6 }, envOf({ density_kgpm3: 1.225, kinematicViscosity_m2ps: 1.46e-5, cruiseSpeed_mps: 18, turbulence: { ...model.turbulence, sigma_u: 0.3, sigma_v: 0.3, sigma_w: 0.2 } }), model);
+  assert.ok(r.chosen.lat.stable);
+  assert.ok(Number.isFinite(r.per1km.lateral_m) && r.per1km.lateral_m > 0);
+  assert.ok(r.disp[r.disp.length - 1].lateral_m > r.disp[0].lateral_m);
+  assert.ok(r.chosen.sl.sigPhi > 0 && r.chosen.sl.sigP > 0);
 });

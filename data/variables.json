@@ -72,6 +72,32 @@
         "kind": "number",
         "step": 1,
         "digits": 1
+      },
+      {
+        "key": "rollInertia_kgm2",
+        "label": "Roll inertia I_x (blank = estimate)",
+        "unit": "kg·m²",
+        "kind": "number",
+        "step": 0.001,
+        "digits": 4,
+        "nullable": true
+      },
+      {
+        "key": "yawInertia_kgm2",
+        "label": "Yaw inertia I_z (blank = estimate)",
+        "unit": "kg·m²",
+        "kind": "number",
+        "step": 0.001,
+        "digits": 4,
+        "nullable": true
+      },
+      {
+        "key": "extraRollStiffness_Nmprad",
+        "label": "Extra roll stiffness K_φ (e.g. hydrostatic W·BG)",
+        "unit": "N·m/rad",
+        "kind": "number",
+        "step": 0.1,
+        "digits": 2
       }
     ],
     "front": [
@@ -124,6 +150,16 @@
         "max": 1,
         "step": 0.01,
         "digits": 2
+      },
+      {
+        "key": "frontDihedral_deg",
+        "label": "Dihedral Γ_front (+ = tips up)",
+        "unit": "°",
+        "kind": "slider",
+        "min": -15,
+        "max": 20,
+        "step": 0.5,
+        "digits": 1
       },
       {
         "key": "frontOswaldE",

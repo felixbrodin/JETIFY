@@ -80,6 +80,7 @@ const Data = (() => {
   // Numeric vehicle fields (flat so that CSV/TSV round-trips cleanly).
   const vehicleNumeric = [
     "hullLength_m", "hullDiameter_m", "xcg_m", "volumeCoeff", "wettedCoeff", "pitchInertia_kgm2", "extraPitchDamping_Nms",
+    "rollInertia_kgm2", "yawInertia_kgm2", "extraRollStiffness_Nmprad", "frontDihedral_deg",
     "frontArea_m2", "frontAR", "frontXle_m", "frontSweepLE_deg", "frontTaper", "frontOswaldE",
     "rearArea_m2", "rearAR", "rearXle_m", "rearSweepLE_deg", "rearTaper", "rearOswaldE", "rearHeight_m", "rearDihedral_deg",
     "finArea_m2", "finAR", "finXle_m", "finSweepLE_deg", "finTaper",
@@ -88,7 +89,7 @@ const Data = (() => {
   // Section ids from data/sections.json; planform "conventional" | "delta";
   // tailType "traditional" | "vtail" | "tailless" | "cruciform" (blank = default).
   const vehicleText = ["tailType", "frontSection", "rearSection", "finSection", "frontPlanform", "rearPlanform"];
-  const vehicleHeaders = ["id", "name", "type", ...vehicleNumeric, ...vehicleText, "downwash"];
+  const vehicleHeaders = ["id", "name", "type", ...vehicleNumeric, ...vehicleText, "downwash", "rollFree"];
   const vehicleRequired = ["hullLength_m", "hullDiameter_m", "frontArea_m2", "rearArea_m2"];
   const payloadHeaders = ["id", "name", "type", "weightKg"];
 
@@ -97,7 +98,8 @@ const Data = (() => {
       id: String(row.id || "").trim() || "custom-" + Math.random().toString(36).slice(2, 8),
       name: String(row.name || "").trim() || "Unnamed vehicle",
       type: String(row.type || "").trim() || "custom",
-      downwash: row.downwash == null || row.downwash === "" ? true : bool(row.downwash)
+      downwash: row.downwash == null || row.downwash === "" ? true : bool(row.downwash),
+      rollFree: row.rollFree == null || row.rollFree === "" ? true : bool(row.rollFree)
     };
     // Older files gave frontX_m / rearX_m (centre of lift); Model.normalizeDesign converts them.
     ["frontX_m", "rearX_m"].forEach(k => { if (num(row[k]) != null) v[k] = num(row[k]); });

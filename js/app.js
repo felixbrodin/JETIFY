@@ -159,6 +159,7 @@
     renderSectionSelect("finSection", "box_fin");
     renderFields("propulsion", "box_propulsion", "design");
     $("tailType").value = state.design.tailType;
+    $("rollFree").checked = state.design.rollFree !== false;
     applyTailType();
   }
   // Drop-down bound to state.design[key]. list: [{id, name, hint?}].
@@ -372,7 +373,15 @@
     $("tsNP").textContent = fmt(r.xnp, 3) + " m from nose";
     $("tsSM").textContent = fmt(r.staticMargin_m, 3) + " m (" + fmt(r.staticMargin_pct, 1) + " % L)";
     $("tsPitch").textContent = modeTxt(c.vert) + (c.vert.stable ? " · eig " + c.vert.eig.map(e => fmt(e.re, 1) + (Math.abs(e.im) > 1e-9 ? (e.im > 0 ? "+" : "−") + fmt(Math.abs(e.im), 1) + "i" : "")).join(", ") : "");
-    $("tsYaw").textContent = c.hasYaw ? modeTxt(c.lat) : "no vertical surfaces";
+    const L = c.lat;
+    $("tsYaw").textContent = !c.hasYaw ? "no vertical surfaces"
+      : L.dutch ? (L.dutch.zeta > 0 ? "" : "UNSTABLE · ") + "ω_n " + fmt(L.dutch.wn, 2) + " rad/s, ζ " + fmt(L.dutch.zeta, 3) : "overdamped (no oscillation)";
+    const halfDouble = (sp) => sp.lambda < 0 ? "stable, T½ " + fmt(sp.T, 1) + " s" : "DIVERGENT, T₂ " + fmt(sp.T, 1) + " s";
+    $("tsRoll").textContent = !ctx.rollFree ? "roll held level"
+      : [L.roll ? "roll τ " + fmt(L.roll.tau, 3) + " s" : null, L.spiral ? "spiral " + halfDouble(L.spiral) : null,
+        L.coupled ? "roll–spiral coupled ω_n " + fmt(L.coupled.wn, 2) + ", ζ " + fmt(L.coupled.zeta, 2) : null].filter(Boolean).join(" · ") || "–";
+    $("tsLatStatic").textContent = fmt(r.lateralStatic.Cnb, 4) + " / " + fmt(r.lateralStatic.Clb, 4);
+    $("tsBank").textContent = c.sl ? fmt(c.sl.sigAlpha * DEG, 2) + "° / " + (ctx.rollFree ? fmt(c.sl.sigPhi * DEG, 1) + "° / " + fmt(c.sl.sigP * DEG, 1) + " °/s" : "– / –") : "–";
     $("tsAlpha").textContent = c.surfV.map(t => t.name + " " + fmt(t.sig * DEG, 2) + "°").join(" / ");
     $("tsN").textContent = "1 ± " + fmt(c.sv.sigL / ctx.W, 2) + " g";
     $("tsQ").textContent = fmt(c.sv.sigQ * DEG, 2) + " °/s";
@@ -807,6 +816,7 @@
       buildVehicleSelect(); loadProfile(v); schedule();
       flash("Saved: " + name);
     });
+    on("rollFree", "change", () => { state.design.rollFree = $("rollFree").checked; schedule(); });
     on("tailType", "change", () => { state.design.tailType = $("tailType").value; applyTailType(); schedule(); });
     on("downwash", "change", () => { state.design.downwash = $("downwash").checked; schedule(); });
     on("useVehicleResponse", "change", () => { state.env.useVehicleResponse = $("useVehicleResponse").checked; schedule(); });

@@ -36,7 +36,14 @@
     "finAR": 1.5,
     "finSweepLE_deg": 35,
     "finTaper": 0.5,
+    "frontDihedral_deg": 0,
+    "extraRollStiffness_Nmprad": 0,
+    "rollFree": true,
     "downwash": true
+  },
+  "lateral": {
+    "_note": "Roll inertia estimate I_x = m0*(D^2/8 + (Rx*b/2)^2), yaw I_z = I_y + m0*(Rx*b/2)^2, b = wing (front pair) span. Rx = non-dimensional radius of gyration 2k_x/b (~0.25 light aircraft, Roskam).",
+    "rollGyrationFactor": 0.25
   },
   "verticalTail": {
     "_note": "Effective aspect ratio of a single vertical fin = factor x geometric AR (h^2/S): endplate effect of fuselage and tailplane (Raymer, Aircraft Design, ~1.55 for conventional tails).",

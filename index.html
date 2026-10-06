@@ -66,6 +66,7 @@
         <div id="box_rear"></div>
         <label class="check"><input id="downwash" type="checkbox"> Downwash from the front pair on the rear pair (DATCOM dε/dα, wake lag l_H/V)</label>
       </div>
+      <label class="check"><input id="rollFree" type="checkbox"> Roll free (unticked = roll held level, e.g. AUV with roll control or large CG–buoyancy offset)</label>
       <div id="finWrap">
         <h3>Vertical fin</h3>
         <div id="box_fin"></div>
@@ -192,8 +193,11 @@
       <div class="kv"><span>Neutral point x<sub>NP</sub></span><b id="tsNP">–</b></div>
       <div class="kv"><span>Static margin</span><b id="tsSM">–</b></div>
       <div class="kv"><span>Pitch/heave mode</span><b id="tsPitch">–</b></div>
-      <div class="kv"><span>Yaw/sway mode</span><b id="tsYaw">–</b></div>
-      <div class="kv"><span>RMS gust incidence, front / rear</span><b id="tsAlpha">–</b></div>
+      <div class="kv"><span>Dutch roll (yaw/sway)</span><b id="tsYaw">–</b></div>
+      <div class="kv"><span>Roll / spiral mode</span><b id="tsRoll">–</b></div>
+      <div class="kv"><span>C<sub>nβ</sub> / C<sub>lβ</sub> (weathercock / dihedral effect)</span><b id="tsLatStatic">–</b></div>
+      <div class="kv"><span>RMS sideslip / bank / roll rate</span><b id="tsBank">–</b></div>
+      <div class="kv"><span>RMS gust incidence (pitch plane)</span><b id="tsAlpha">–</b></div>
       <div class="kv"><span>RMS load factor (vertical)</span><b id="tsN">–</b></div>
       <div class="kv"><span>RMS pitch rate</span><b id="tsQ">–</b></div>
       <div class="kv"><span>RMS path-angle wander, vert. / lat.</span><b id="tsGamma">–</b></div>

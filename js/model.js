@@ -364,6 +364,180 @@ const Model = (() => {
     return { sigFinAlpha: varFin.map(Math.sqrt), sigL: Math.sqrt(varL), sigQ: Math.sqrt(varQ), sigAlpha: Math.sqrt(varAlpha) };
   }
 
+  // ---------- Lateral-directional dynamics (sideslip, roll, yaw, bank) ----------
+  // Small helpers: characteristic polynomial (Faddeev–LeVerrier) and its roots (Durand–Kerner).
+  function charPoly(A) {
+    const n = A.length, c = new Array(n + 1).fill(0);
+    c[n] = 1;
+    let M = A.map(r => r.map(() => 0));
+    const mul = (X, Y) => X.map((r, i) => Y[0].map((_, j) => r.reduce((a, _x, k) => a + X[i][k] * Y[k][j], 0)));
+    for (let k = 1; k <= n; k++) {
+      M = mul(A, M); for (let i = 0; i < n; i++) M[i][i] += c[n - k + 1];
+      const AM = mul(A, M);
+      c[n - k] = -AM.reduce((a, r, i) => a + r[i], 0) / k;
+    }
+    return c;                       // c[i] = coefficient of λ^i
+  }
+  function polyRoots(c) {
+    const n = c.length - 1;
+    const scale = Math.max(1, ...c.slice(0, n).map(Math.abs));
+    let z = Array.from({ length: n }, (_, i) => cscale(cexpi(0.4 + 2 * Math.PI * i / n), scale));
+    const ev = (x) => { let r = cx(1); for (let i = n - 1; i >= 0; i--) r = cadd(cmul(r, x), cx(c[i])); return r; };
+    for (let it = 0; it < 2000; it++) {
+      let moved = 0;
+      z = z.map((zi, i) => {
+        let den = cx(1);
+        z.forEach((zj, j) => { if (j !== i) den = cmul(den, cadd(zi, cscale(zj, -1))); });
+        const d = cdiv(ev(zi), den);
+        moved = Math.max(moved, Math.sqrt(cabs2(d)) / (1 + Math.sqrt(cabs2(zi))));
+        return cadd(zi, cscale(d, -1));
+      });
+      if (moved < 1e-13) break;
+    }
+    return z.map(e => Math.abs(e.im) < 1e-9 * (1 + Math.abs(e.re)) ? cx(e.re) : e);
+  }
+  // Complex Gaussian elimination: solves M·x = b (M n×n of {re,im}).
+  function csolve(M, b) {
+    const n = b.length, A = M.map((r, i) => [...r, b[i]]);
+    for (let k = 0; k < n; k++) {
+      let piv = k;
+      for (let i = k + 1; i < n; i++) if (cabs2(A[i][k]) > cabs2(A[piv][k])) piv = i;
+      [A[k], A[piv]] = [A[piv], A[k]];
+      for (let i = k + 1; i < n; i++) {
+        const f = cdiv(A[i][k], A[k][k]);
+        for (let j = k; j <= n; j++) A[i][j] = cadd(A[i][j], cscale(cmul(f, A[k][j]), -1));
+      }
+    }
+    const x = new Array(n);
+    for (let i = n - 1; i >= 0; i--) {
+      let sum = A[i][n];
+      for (let j = i + 1; j < n; j++) sum = cadd(sum, cscale(cmul(A[i][j], x[j]), -1));
+      x[i] = cdiv(sum, A[i][i]);
+    }
+    return x;
+  }
+
+  // Strip-theory roll/yaw derivatives of a horizontal (or panel) pair, dimensional:
+  //   C_lβ = −a·Γ·(1+2λ)/(6(1+λ)) − CL·tanΛ¼c·(1+2λ)/(3(1+λ))     (dihedral + sweep)
+  //   L_p  = −q·a·c_r·b³·(1+3λ)/(48V)                              (C_lp = −a(1+3λ)/(12(1+λ)))
+  //   C_lr = CL/4,  C_np = −CL/8,  C_nr = −CD0/4   (per p·b/2V, r·b/2V; Nelson)
+  function pairRollDerivs(pair, slope, CL, dihedralRad, qbar, V) {
+    const f = pair.pf, b = f.b, lam = f.taper, qSb = qbar * pair.area * b, k = b / (2 * V);
+    const Clb = -slope * dihedralRad * (1 + 2 * lam) / (6 * (1 + lam)) - CL * f.tanQc * (1 + 2 * lam) / (3 * (1 + lam));
+    return {
+      Lb: qSb * Clb,
+      Lp: -qbar * slope * f.cr * b * b * b * (1 + 3 * lam) / (48 * V),
+      Lr: qSb * CL / 4 * k, Np: -qSb * CL / 8 * k, Nr: -qSb * pair.cd0 / 4 * k
+    };
+  }
+
+  // States [β, p, r, φ] (sideslip, roll rate, yaw rate, bank; stability axes, I_xz neglected):
+  //   m'V(β̇ + r) = Y + W·φ,   I_x·ṗ = L − K_φ·φ,   I_z'·ṙ = N,   φ̇ = p
+  // Side-force surfaces i (fin, V-tail yaw share, cruciform pairs) at arm l_i (aft) and height
+  // z_i above the roll axis feel β_i = β − r·l_i/V + p·z_i/V (+ gust) and give Y_i = −K_i·β_i,
+  // L_i = Y_i·z_i, N_i = −Y_i·l_i. Horizontal pairs add the strip-theory derivatives above.
+  // Inputs: lateral gust v (delayed/chord-averaged per surface, Froude–Krylov on the hull) and
+  // the rolling gust p_g (antisymmetric w, acts on the wing like a roll rate).
+  function lateralSystem(p) {
+    const V = p.V, mV = p.mPrime * V, Ix = p.Ix, Iz = p.Iz;
+    const H = p.horiz;   // summed horizontal-pair derivatives
+    let Yb = 0, Yp = 0, Yr = 0, Lb = H.Lb, Lp = H.Lp, Lr = H.Lr, Nb = -p.Mah, Np = H.Np, Nr = H.Nr;
+    p.fins.forEach(f => {
+      Yb -= f.K; Yp -= f.K * f.z / V; Yr += f.K * f.l / V;
+      Lb -= f.K * f.z; Lp -= f.K * f.z * f.z / V; Lr += f.K * f.l * f.z / V;
+      Nb += f.K * f.l; Np += f.K * f.l * f.z / V; Nr -= f.K * f.l * f.l / V;
+    });
+    const Afull = [
+      [Yb / mV, Yp / mV, Yr / mV - 1, p.W / mV],
+      [Lb / Ix, Lp / Ix, Lr / Ix, -p.Kphi / Ix],
+      [Nb / Iz, Np / Iz, Nr / Iz, 0],
+      [0, 1, 0, 0]
+    ];
+    // Roll held level (p = φ = 0, e.g. AUV roll control): only sideslip and yaw remain.
+    const idx = p.rollLocked ? [0, 2] : [0, 1, 2, 3];
+    const A = idx.map(i => idx.map(j => Afull[i][j]));
+    const eig = polyRoots(charPoly(A)).sort((a, b) => a.re - b.re);
+    const stable = eig.every(e => e.re < -1e-9);
+    // Mode identification: complex pair = Dutch roll (the faster one if two pairs);
+    // real roots: most negative = roll subsidence, smallest |λ| = spiral.
+    const cplx = eig.filter(e => e.im > 0), real = eig.filter(e => e.im === 0);
+    const wnOf = (e) => Math.sqrt(e.re * e.re + e.im * e.im);
+    const dr = cplx.length ? cplx.reduce((a, e) => wnOf(e) > wnOf(a) ? e : a) : null;
+    const dutch = dr ? { wn: wnOf(dr), zeta: -dr.re / wnOf(dr), eig: dr } : null;
+    const others = eig.filter(e => !(dr && Math.abs(e.re - dr.re) < 1e-12 && Math.abs(Math.abs(e.im) - dr.im) < 1e-12));
+    let roll = null, spiral = null, coupled = null;
+    if (p.rollLocked) { /* no roll or spiral mode */ }
+    else if (others.every(e => e.im === 0) && others.length) {
+      const srt = others.slice().sort((a, b) => Math.abs(a.re) - Math.abs(b.re));
+      spiral = { lambda: srt[0].re };
+      if (srt.length > 1) roll = { lambda: srt[srt.length - 1].re, tau: -1 / srt[srt.length - 1].re };
+    } else if (others.length) {
+      const e = others.find(x => x.im > 0);
+      coupled = { wn: wnOf(e), zeta: -e.re / wnOf(e) };   // roll–spiral ("lateral phugoid")
+    }
+    if (spiral) spiral.T = spiral.lambda !== 0 ? Math.LN2 / Math.abs(spiral.lambda) : Infinity;   // time to double (unstable) or halve
+
+    function transfer(Om, rigid, input) {
+      const w = Om * V;
+      const isV = input !== "p";
+      const fw = p.fins.map(f => isV ? cscale(cexpi(-Om * f.x), sinc(Om * f.chord / 2) / V) : cx(0));
+      const hw = isV ? cscale(cexpi(-Om * p.hullL / 2), sinc(Om * p.hullL / 2) / V) : cx(0);
+      const ww = isV ? cscale(cexpi(-Om * p.wingX), sinc(Om * p.wingChord / 2) / V) : cx(0);
+      const Ffk = cmul(cx(0, w), cscale(hw, -p.fkMass * V));
+      let Yg = Ffk, Lg = isV ? cscale(ww, H.Lb) : cx(-H.Lp), Ng = isV ? cscale(hw, -p.Mah) : cx(-H.Np);
+      Ng = cadd(Ng, cscale(Ffk, -p.fkArm));
+      p.fins.forEach((f, i) => {
+        Yg = cadd(Yg, cscale(fw[i], -f.K));
+        Lg = cadd(Lg, cscale(fw[i], -f.K * f.z));
+        Ng = cadd(Ng, cscale(fw[i], f.K * f.l));
+      });
+      const x = [cx(0), cx(0), cx(0), cx(0)];
+      if (!rigid) {
+        const rhs = [cscale(Yg, 1 / mV), cscale(Lg, 1 / Ix), cscale(Ng, 1 / Iz), cx(0)];
+        const M = A.map((r, i) => r.map((a, j) => cx(-a, i === j ? w : 0)));   // iωI − A
+        const xs = csolve(M, idx.map(i => rhs[i]));
+        idx.forEach((i, k) => { x[i] = xs[k]; });
+      }
+      const [beta, pr, r, phi] = x;
+      const finAlpha = p.fins.map((f, i) => cadd(cadd(cadd(beta, cscale(r, -f.l / V)), cscale(pr, f.z / V)), fw[i]));
+      let dY = cx(0);
+      p.fins.forEach((f, i) => { dY = cadd(dY, cscale(finAlpha[i], -f.K)); });
+      const gammaDot = cscale(cadd(cadd(dY, rigid ? cx(0) : Ffk), cscale(phi, p.W)), 1 / mV);   // course rate
+      return { finAlpha, dL: dY, q: r, alpha: beta, gammaDot, phi, p: pr };
+    }
+    const La = -Yb;   // side-force slope (kept for compatibility with the pitch-plane object)
+    return {
+      La, eig, stable, dutch, roll, spiral, coupled, transfer,
+      wn: dutch ? dutch.wn : null, zeta: dutch ? dutch.zeta : null,
+      deriv: { Yb, Yp, Yr, Lb, Lp, Lr, Nb, Np, Nr },
+      // Views with one gust input each (same interface as planeSystem for the integrators).
+      byInput: (inp) => ({ stable, transfer: (Om, rigid) => transfer(Om, rigid, inp) })
+    };
+  }
+
+  // RMS statistics of the lateral system over both gust inputs (v and rolling gust p_g).
+  function lateralStats(sys, phiV, phiP, grid, rigid) {
+    const nF = sys.transfer(1, true, "v").finAlpha.length;
+    const vF = new Array(nF).fill(0);
+    let vY = 0, vR = 0, vB = 0, vPhi = 0, vP = 0;
+    [["v", phiV], ["p", phiP]].forEach(([inp, phi]) => {
+      for (let k = 0; k < grid.n; k++) {
+        const Om = grid.om[k], ph = phi(Om) * grid.w[k];
+        const t = sys.transfer(Om, rigid, inp);
+        for (let i = 0; i < nF; i++) vF[i] += cabs2(t.finAlpha[i]) * ph;
+        vY += cabs2(t.dL) * ph; vR += cabs2(t.q) * ph; vB += cabs2(t.alpha) * ph;
+        vPhi += cabs2(t.phi) * ph; vP += cabs2(t.p) * ph;
+      }
+    });
+    return { sigFinAlpha: vF.map(Math.sqrt), sigL: Math.sqrt(vY), sigQ: Math.sqrt(vR), sigAlpha: Math.sqrt(vB), sigPhi: Math.sqrt(vPhi), sigP: Math.sqrt(vP) };
+  }
+
+  // Rolling-gust spectrum (MIL-F-8785C), spatial: Φ_p(Ω) = σ_w²/L_w · 0.8(πL_w/4b)^{1/3} / (1 + (4bΩ/π)²).
+  function phiRolling(Om, sigma, L, b) {
+    const x = 4 * b * Om / Math.PI;
+    return sigma * sigma / L * 0.8 * Math.cbrt(Math.PI * L / (4 * b)) / (1 + x * x);
+  }
+
   // RMS track wander about the mean course after distance X, no steering.
   // y(T) − y(0) = V ∫₀ᵀ γ dt, γ = γ̇/(iω) (stationary path angle; linear theory
   // returns the path to its original direction once a gust has passed):
@@ -378,6 +552,26 @@ const Model = (() => {
     for (let k = 0; k < g.n; k++) {
       const Om = g.om[k], w = Om * V, s = Math.sin(w * T / 2);
       v += cabs2(sys.transfer(Om, false).gammaDot) * phi(Om) * 4 * s * s / (w * w * w * w) * g.w[k];
+    }
+    return V * Math.sqrt(v);
+  }
+
+  // Same, measured from the INITIAL course (γ(0) = 0):
+  //   y(T) = V ∫₀ᵀ ∫₀ᵗ γ̇ dt' dt  →  Var = V² ∫ |G_γ̇|² Φ · |(e^{iωT} − 1 − iωT)/(iω)|²/ω² dΩ
+  // Finite even when a steady input gives a steady turn rate (heading random walk), as the
+  // rolling gust does; then the "about the mean course" form above has no finite limit.
+  function dispersionFromStart(sys, phi, V, X, cfg) {
+    if (!sys.stable) return Infinity;
+    const T = X / V;
+    const g = logGrid(Math.min(cfg.omegaMin_radpm, 0.01 / X), cfg.omegaMax_radpm, cfg.points);
+    let v = 0;
+    for (let k = 0; k < g.n; k++) {
+      const Om = g.om[k], w = Om * V, a = w * T;
+      // |(e^{ia} − 1 − ia)/(ia)|²·T²/ω²  (series for small a: T⁴/4)
+      let kern;
+      if (a < 1e-3) kern = T * T * T * T / 4 * (1 - a * a / 9);
+      else { const re = Math.cos(a) - 1, im = Math.sin(a) - a; kern = (re * re + im * im) / (a * a) * T * T / (w * w); }
+      v += cabs2(sys.transfer(Om, false).gammaDot) * phi(Om) * kern * g.w[k];
     }
     return V * Math.sqrt(v);
   }
@@ -424,6 +618,12 @@ const Model = (() => {
     // Pitch inertia: override or uniform solid cylinder; added mass/inertia from Lamb.
     const I0 = design.pitchInertia_kgm2 != null && design.pitchInertia_kgm2 > 0
       ? design.pitchInertia_kgm2 : m0 * (hull.L * hull.L / 12 + hull.D * hull.D / 16);
+    // Roll / yaw inertia: override or estimate. Wing part from the non-dimensional radius of
+    // gyration R̄x = 2k_x/b (model.json lateral.rollGyrationFactor, ≈ 0.25 for light aircraft).
+    const Rx = (model.lateral && model.lateral.rollGyrationFactor != null) ? model.lateral.rollGyrationFactor : 0.25;
+    const IxWing = m0 * Math.pow(Rx * front.pf.b / 2, 2);
+    const Ix = design.rollInertia_kgm2 > 0 ? design.rollInertia_kgm2 : m0 * hull.D * hull.D / 8 + IxWing;
+    const Iz0 = design.yawInertia_kgm2 > 0 ? design.yawInertia_kgm2 : I0 + IxWing;
     const a = hull.L / 2, b = hull.D / 2;
     const Iadd = hull.lamb.kp * rho * hull.volume * (a * a + b * b) / 5;
     const mAdd = hull.lamb.k2 * rho * hull.volume;
@@ -431,6 +631,8 @@ const Model = (() => {
     const etaJet = c.etaJet != null ? c.etaJet : design.jetEfficiency;
     return {
       g, rho, hull, front, rear, fin, tailType, proj, m0, mEnd, W, xcg, I0, Iadd, mAdd, An, etaJet,
+      Ix, Iz: Iz0 + Iadd, Kphi: design.extraRollStiffness_Nmprad || 0, rollFree: design.rollFree !== false, wingDihedral: (design.frontDihedral_deg || 0) / DEG,
+      vtailDihedral: tailType === "vtail" ? (design.rearDihedral_deg || 0) / DEG : 0,
       nu: env.kinematicViscosity_m2ps,
       extraDragArea: (c.extraDragArea_m2 != null ? c.extraDragArea_m2 : (hy.extraDragArea_m2 || 0)),
       hullCDwetOverride: c.hullCDwet != null ? c.hullCDwet : null,
@@ -491,7 +693,25 @@ const Model = (() => {
     if (ctx.rear && ctx.proj.rear.yaw > 0) lTags.push({ name: ctx.tailType === "vtail" ? "V-tail" : "rear", pair: ctx.rear, proj: ctx.proj.rear.yaw });
     if (ctx.fin) lTags.push({ name: "fin", pair: ctx.fin, proj: 1 });
     lTags.forEach(t => { t.st = liftState(t.pair, 0); });
-    const lat = planeSystem({ ...base, fins: lTags.map(t => fin(t, t.pair.clAlpha, t.pair.pf.xAc25)) });
+    // Height of each side-force surface's a.c. above the roll axis (hull centreline).
+    const zOf = (t) => t.pair === ctx.fin ? ctx.hull.D / 2 + ctx.fin.pf.yMac
+      : (ctx.tailType === "vtail" && t.pair === ctx.rear ? (ctx.hull.D / 2 + ctx.rear.pf.yMac) * Math.sin(ctx.vtailDihedral) : 0);
+    // Horizontal pairs: wing (with dihedral), rear tail / V-tail panels (roll damping), and in
+    // cruciform the vertical pairs as well (roll damping only).
+    const H = { Lb: 0, Lp: 0, Lr: 0, Np: 0, Nr: 0 };
+    const addH = (d) => Object.keys(H).forEach(k => { H[k] += d[k]; });
+    addH(pairRollDerivs(ctx.front, tr.fs.slope, tr.CLf, ctx.wingDihedral, qbar, V));
+    if (ctx.rear) addH(pairRollDerivs(ctx.rear, tr.rs.slope, ctx.tailType === "vtail" ? 0 : tr.CLr, 0, qbar, V));
+    if (ctx.cruciform) {
+      addH(pairRollDerivs(ctx.front, ctx.front.clAlpha, 0, 0, qbar, V));
+      addH(pairRollDerivs(ctx.rear, ctx.rear.clAlpha, 0, 0, qbar, V));
+    }
+    const lat = lateralSystem({
+      V, W: ctx.W, mPrime: ctx.m0 + ctx.mAdd, Ix: ctx.Ix, Iz: ctx.Iz, Kphi: ctx.Kphi, rollLocked: !ctx.rollFree,
+      Mah, fkMass: base.fkMass, fkArm: base.fkArm, hullL: ctx.hull.L,
+      wingX: tr.fs.xAc, wingChord: ctx.front.chord, horiz: H,
+      fins: lTags.map(t => ({ ...fin(t, t.pair.clAlpha, t.pair.pf.xAc25), z: zOf(t) }))
+    });
     return { vert, lat, vTags, lTags };
   }
 
@@ -512,10 +732,11 @@ const Model = (() => {
     const useDynV = opts.withDynamics && vert.stable;
     const useDynL = opts.withDynamics && lat.stable;
     const sv = planeStats(vert, phiW, grid, !useDynV);
-    const sl = hasYaw ? planeStats(lat, phiV, grid, !useDynL) : null;
+    const phiP = (Om) => phiRolling(Om, tu.sigma_w, tu.L_w, ctx.front.pf.b);
+    const sl = lateralStats(lat, phiV, phiP, grid, !useDynL);
     // Per-surface panel incidence σ (plane incidence × projection).
     const surfV = vTags.map((t, i) => ({ ...t, CL: i === 0 ? CLf : CLr, sig: sv.sigFinAlpha[i] * t.proj }));
-    const surfL = sl ? lTags.map((t, i) => ({ ...t, sig: sl.sigFinAlpha[i] * t.proj })) : [];
+    const surfL = lTags.map((t, i) => ({ ...t, sig: sl.sigFinAlpha[i] * t.proj }));
 
     // Dynamic-pressure penalty from u/v/w (optional; the reference script ignores it).
     let qPar = qbar;
@@ -567,7 +788,7 @@ const Model = (() => {
       drag: { hull: D_hull, finProfile: D_finProfile, trim: D_trim, gustV: D_gustV, gustL: D_gustL, extra: D_extra, total: D, calm: D_calm },
       jet, P_engine, etaTot, avail, throttle, feasible: throttle <= 1,
       LD, lnM, rangeKm: rangeM / 1000, enduranceH: rangeM / V / 3600, cEq_perHour, fuelFlow_kgph,
-      phiW, phiV
+      phiW, phiV, phiP
     };
   }
 
@@ -603,6 +824,8 @@ const Model = (() => {
     const xnp = ctx.xcg + (sumK > 0 ? -v.Ma / sumK : -Infinity);
     const staticMargin_m = xnp - ctx.xcg;
     const staticMargin_pct = staticMargin_m / ctx.hull.L * 100;
+    const qSb = chosen.qbar * ctx.front.area * ctx.front.pf.b;
+    const lateralStatic = { Cnb: chosen.lat.deriv.Nb / qSb, Clb: chosen.lat.deriv.Lb / qSb };
 
     // Trajectory dispersion with no steering.
     const sp = model.spectral;
@@ -611,19 +834,21 @@ const Model = (() => {
     const xEnd = Math.max(0.1, Math.min(chosen.rangeKm, sp.dispersionMaxKm)) * 1000;
     for (let i = 1; i <= nD; i++) distances.push(xEnd * i / nD);
     const tu = env.turbulence;
+    // Lateral wander: lateral gust v and rolling gust p_g are independent → variances add.
+    const latWander = (X) => Math.hypot(dispersion(chosen.lat.byInput("v"), chosen.phiV, chosen.V, X, sp), dispersionFromStart(chosen.lat.byInput("p"), chosen.phiP, chosen.V, X, sp));
     const disp = distances.map(X => ({
       km: X / 1000,
       depth_m: dispersion(chosen.vert, chosen.phiW, chosen.V, X, sp),
-      lateral_m: chosen.hasYaw ? dispersion(chosen.lat, chosen.phiV, chosen.V, X, sp) : Infinity
+      lateral_m: latWander(X)
     }));
     const per1km = {
       depth_m: dispersion(chosen.vert, chosen.phiW, chosen.V, 1000, sp),
-      lateral_m: chosen.hasYaw ? dispersion(chosen.lat, chosen.phiV, chosen.V, 1000, sp) : Infinity
+      lateral_m: latWander(1000)
     };
     const atRange = disp.length ? disp[disp.length - 1] : null;
     const pathAngle = {
       vert_rad: pathAngleRms(chosen.vert, chosen.phiW, chosen.V, sp),
-      lat_rad: chosen.hasYaw ? pathAngleRms(chosen.lat, chosen.phiV, chosen.V, sp) : Infinity
+      lat_rad: pathAngleRms(chosen.lat.byInput("v"), chosen.phiV, chosen.V, sp)   // rolling-gust heading drift is a random walk → in the track wander
     };
 
     // Static-margin design sweep vs the rear pair's root-LE position (tailless: the wing's).
@@ -656,6 +881,12 @@ const Model = (() => {
     const sigAdeg = Math.max(...chosen.sv.sigFinAlpha) * DEG;
     if (sigAdeg > lim.maxGustAlphaDeg)
       warnings.push(`RMS gust incidence at the fins ≈ ${round(sigAdeg, 1)}° exceeds ${lim.maxGustAlphaDeg}° – small-angle (linear) assumption is stretched.`);
+    if (chosen.sl && chosen.lat.stable && ctx.rollFree && chosen.sl.sigPhi * DEG > 30)
+      warnings.push(`RMS bank angle ≈ ${round(chosen.sl.sigPhi * DEG, 0)}° – far beyond small-angle theory. Uncontrolled, the vehicle would roll off into a spiral; the lateral wander figures are only an indication. More dihedral effect, a rolling-gust-tolerant layout or roll control is needed.`);
+    [["depth", per1km.depth_m], ["lateral", per1km.lateral_m]].forEach(([n, y]) => {
+      if (Number.isFinite(y) && y > 300)
+        warnings.push(`RMS ${n} track wander after 1 km ≈ ${round(y, 0)} m exceeds 30 % of the distance – beyond small-angle theory: without control the vehicle does not hold its course. Use the mode data (stability, damping, time constants) rather than the wander figure.`);
+    });
     if (!chosen.feasible)
       warnings.push(`Cruise speed ${round(chosen.V, 1)} m/s needs ${round(chosen.P_engine / 1000, 1)} kW engine power – above the ${round(design.maxPower_kW, 1)} kW available.`);
     if (staticMargin_m <= 0)
@@ -664,8 +895,13 @@ const Model = (() => {
       warnings.push("Pitch/heave mode is dynamically unstable – trajectory dispersion is unbounded without control.");
     if (!chosen.hasYaw)
       warnings.push("No vertical surfaces (fin area 0): the hull alone is unstable in yaw (Munk moment) – lateral dispersion is unbounded.");
-    else if (!chosen.lat.stable)
-      warnings.push("Yaw/sway mode is unstable – lateral dispersion is unbounded without control.");
+    else if (!chosen.lat.stable) {
+      const L = chosen.lat;
+      if (L.dutch && L.dutch.zeta <= 0) warnings.push(`Dutch roll is unstable (ζ ${round(L.dutch.zeta, 3)}) – more fin area/arm or less dihedral effect.`);
+      if (L.spiral && L.spiral.lambda >= 0) warnings.push(`Spiral mode diverges (time to double ${round(L.spiral.T, 1)} s) – without roll control the path slowly banks away; lateral dispersion is unbounded. More dihedral effect (C_lβ more negative) or less fin stabilises it.`);
+      if (L.roll && L.roll.lambda >= 0) warnings.push("Roll mode is unstable.");
+      if (!L.dutch && !L.spiral && !L.roll) warnings.push("Lateral-directional motion is unstable – lateral dispersion is unbounded without control.");
+    }
     if (chosen.CLf < 0 || chosen.CLr < 0)
       warnings.push(`CG (${round(ctx.xcg, 2)} m) lies outside the fin pairs – one pair carries negative lift (CL_front ${round(chosen.CLf, 3)}, CL_rear ${round(chosen.CLr, 3)}).`);
     const T = chosen.trim;
@@ -712,12 +948,13 @@ const Model = (() => {
       { t: "Drag build-up", d: `hull ${round(D.hull, 1)} + fin profile ${round(D.finProfile, 1)} + trim induced ${round(D.trim, 1)} + gust (vert) ${round(D.gustV, 1)} + gust (lat) ${round(D.gustL, 1)} + extra ${round(D.extra, 1)} = ${round(D.total, 1)} N` },
       { t: "Waterjet", d: `T = D → Vj = ${round(chosen.jet.Vj, 2)} m/s, η_F = ${round(chosen.jet.etaF, 3)}, P_jet = ${round(chosen.jet.Pjet / 1000, 2)} kW, P_engine = P_jet/η_jet = ${round(chosen.P_engine / 1000, 2)} kW (${round(chosen.throttle * 100, 0)} % of max)` },
       { t: "Breguet", d: `R = η_jet·η_F/(BSFC·g)·(L/D)·ln(m0/m_end) = ${round(chosen.etaTot, 3)}/(BSFC·g)·${round(chosen.LD, 3)}·${round(chosen.lnM, 4)} = ${round(chosen.rangeKm, 2)} km  (equiv. c = ${round(chosen.cEq_perHour, 3)} 1/h)` },
+      { t: "Lateral", d: (ctx.rollFree ? "" : "roll held level (p = φ = 0) · ") + `C_nβ = ${round(lateralStatic.Cnb, 4)} (weathercock, > 0 stable), C_lβ = ${round(lateralStatic.Clb, 4)} (dihedral effect, < 0 stable), wing Γ ${round(ctx.wingDihedral * DEG, 1)}° · I_x ${round(ctx.Ix, 4)}, I_z ${round(ctx.Iz, 4)} kg·m²` + (ctx.Kphi ? `, roll stiffness ${round(ctx.Kphi, 2)} N·m/rad` : "") + ` · ` + [chosen.lat.dutch ? `Dutch roll ω_n ${round(chosen.lat.dutch.wn, 2)} rad/s ζ ${round(chosen.lat.dutch.zeta, 3)}` : "no Dutch-roll oscillation", chosen.lat.roll ? `roll τ ${round(chosen.lat.roll.tau, 3)} s` : null, chosen.lat.spiral ? `spiral λ ${round(chosen.lat.spiral.lambda, 4)} 1/s` : null, chosen.lat.coupled ? `roll–spiral coupled ω_n ${round(chosen.lat.coupled.wn, 2)}` : null].filter(Boolean).join(", ") },
       { t: "Stability", d: `x_NP = ${round(xnp, 3)} m, static margin = ${round(staticMargin_m, 3)} m (${round(staticMargin_pct, 1)} % L), Munk k2−k1 = ${round(ctx.hull.lamb.k2 - ctx.hull.lamb.k1, 3)}` }
     ];
 
     return {
       design, env, ctx, chosen, scan, best, vMax,
-      xnp, staticMargin_m, staticMargin_pct,
+      xnp, staticMargin_m, staticMargin_pct, lateralStatic,
       disp, per1km, atRange, pathAngle, smSweep, smSweepOf, spectrum,
       warnings, steps
     };
@@ -759,7 +996,7 @@ const Model = (() => {
     analyze, envelope, round, presetsFromVariables,
     // exposed for tests / docs
     normalizeDesign,
-    _internal: { phiLongitudinal, phiTransverse, logGrid, lambCoefficients, helmbold, sectionAt, finPair, planform, liftState, deltaCL, downwashGradient, trim, jetForThrust, thrustForJetPower, ittcCf, hullGeometry, planeSystem, planeStats }
+    _internal: { phiLongitudinal, phiTransverse, phiRolling, charPoly, polyRoots, csolve, pairRollDerivs, lateralSystem, logGrid, lambCoefficients, helmbold, sectionAt, finPair, planform, liftState, deltaCL, downwashGradient, trim, jetForThrust, thrustForJetPower, ittcCf, hullGeometry, planeSystem, planeStats }
   };
 })();
 

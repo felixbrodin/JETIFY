@@ -10,6 +10,9 @@
     "wettedCoeff": 0.9,
     "pitchInertia_kgm2": null,
     "extraPitchDamping_Nms": 0,
+    "rollInertia_kgm2": null,
+    "yawInertia_kgm2": null,
+    "extraRollStiffness_Nmprad": 0,
     "frontArea_m2": 0.05,
     "frontAR": 2.5,
     "frontXle_m": 0.3146,
@@ -17,6 +20,7 @@
     "frontTaper": 1,
     "frontPlanform": "conventional",
     "frontOswaldE": null,
+    "frontDihedral_deg": 0,
     "rearArea_m2": 0.15,
     "rearAR": 2.5,
     "rearXle_m": 1.5888,
@@ -38,7 +42,8 @@
     "bsfc_kgpkWh": 0.45,
     "emptyMass_kg": 35,
     "fuelMass_kg": 15,
-    "downwash": false
+    "downwash": false,
+    "rollFree": false
   },
   {
     "id": "jetify-compact",
@@ -51,6 +56,9 @@
     "wettedCoeff": 0.9,
     "pitchInertia_kgm2": null,
     "extraPitchDamping_Nms": 0,
+    "rollInertia_kgm2": null,
+    "yawInertia_kgm2": null,
+    "extraRollStiffness_Nmprad": 0,
     "frontArea_m2": 0.012,
     "frontAR": 2.0,
     "frontXle_m": 0.2306,
@@ -58,6 +66,7 @@
     "frontTaper": 1,
     "frontPlanform": "conventional",
     "frontOswaldE": null,
+    "frontDihedral_deg": 0,
     "rearArea_m2": 0.04,
     "rearAR": 2.0,
     "rearXle_m": 1.0646,
@@ -79,7 +88,8 @@
     "bsfc_kgpkWh": 0.5,
     "emptyMass_kg": 18,
     "fuelMass_kg": 6,
-    "downwash": false
+    "downwash": false,
+    "rollFree": false
   },
   {
     "id": "jetify-transit",
@@ -92,6 +102,9 @@
     "wettedCoeff": 0.92,
     "pitchInertia_kgm2": null,
     "extraPitchDamping_Nms": 0,
+    "rollInertia_kgm2": null,
+    "yawInertia_kgm2": null,
+    "extraRollStiffness_Nmprad": 0,
     "frontArea_m2": 0.04,
     "frontAR": 3.0,
     "frontXle_m": 0.5711,
@@ -99,6 +112,7 @@
     "frontTaper": 1,
     "frontPlanform": "conventional",
     "frontOswaldE": null,
+    "frontDihedral_deg": 0,
     "rearArea_m2": 0.12,
     "rearAR": 3.0,
     "rearXle_m": 2.9,
@@ -120,6 +134,7 @@
     "bsfc_kgpkWh": 0.42,
     "emptyMass_kg": 140,
     "fuelMass_kg": 90,
-    "downwash": false
+    "downwash": false,
+    "rollFree": false
   }
 ]

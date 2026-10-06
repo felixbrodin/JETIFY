@@ -191,6 +191,41 @@ Outputs:
 
 Pitch inertia defaults to a uniform solid cylinder `m0(L²/12 + D²/16)` unless given.
 
+### Lateral-directional: sideslip, roll, yaw, bank
+
+States `[β, p, r, φ]` (stability axes, I_xz neglected):
+
+```
+m'V(β̇ + r) = Y + W·φ          I_x·ṗ = L − K_φ·φ          I_z'·ṙ = N          φ̇ = p
+```
+
+* **Side-force surfaces** (vertical fin, V-tail yaw share, cruciform pairs) with slope
+  `K_i = q·S_i·CLα_i·proj²`, arm l_i (aft of CG) and height z_i of the a.c. above the roll
+  axis (fin: D/2 + ȳ_MAC; V-tail: (D/2 + ȳ_MAC)·sinΓ; cruciform: 0) feel
+  `β_i = β − r·l_i/V + p·z_i/V (+ gust)` and give `Y_i = −K_i·β_i`, `L_i = Y_i·z_i`, `N_i = −Y_i·l_i`.
+* **Horizontal pairs** (strip theory / Nelson, per pair, slope a at trim):
+  `C_lβ = −a·Γ·(1+2λ)/(6(1+λ)) − CL·tanΛ¼c·(1+2λ)/(3(1+λ))` (dihedral + sweep),
+  `C_lp = −a(1+3λ)/(12(1+λ))`, `C_lr = CL/4`, `C_np = −CL/8`, `C_nr = −CD0/4`.
+  Dihedral Γ is an input for the wing (front pair); tail/V-tail panels add roll damping.
+* **Hull**: Munk yaw moment `N_β −= (k₂−k₁)ρVol·V²`, Froude–Krylov side force on the hull.
+* **Inertia** (blank = estimate): `I_x = m0(D²/8 + (R̄x·b/2)²)`, `I_z = I_y + m0(R̄x·b/2)²`,
+  R̄x = `model.json → lateral.rollGyrationFactor` (0.25). Optional roll stiffness K_φ
+  (e.g. hydrostatic W·BG for an AUV – buoyancy itself stays outside the model).
+* **Roll held level** (`rollFree: false`, used by the bundled AUV profiles): only β and r
+  remain – the previous yaw/sway model.
+* **Modes**: eigenvalues of the 4×4 matrix (characteristic polynomial + Durand–Kerner).
+  Complex pair = Dutch roll; real roots: most negative = roll subsidence (τ = −1/λ),
+  smallest |λ| = spiral (T½ or T₂ = ln2/|λ|). Static: `C_nβ` (> 0) and `C_lβ` (< 0),
+  referenced to the wing (q·S·b).
+* **Gust inputs** (independent, variances add): lateral gust v (delay + chord averaging per
+  surface, as in pitch) and the MIL-F-8785C rolling gust
+  `Φ_p(Ω) = σ_w²/L_w · 0.8(πL_w/4b)^{1/3} / (1 + (4bΩ/π)²)` acting on the horizontal pairs.
+* **Lateral track wander**: course rate `χ̇ = (Y + W·φ)/(m'V)`. A steady rolling moment gives
+  a steady turn (heading random walk), so the rolling-gust part is measured from the
+  initial course: `Var = V²∫|G_χ̇|²Φ·|(e^{iωT}−1−iωT)/(iω)|²/ω² dΩ`. A warning flags wander
+  above 30 % of the distance (beyond small-angle theory – the uncontrolled vehicle does not
+  hold course) and RMS bank above 30°.
+
 ## 6. Waterjet and range
 
 ```
@@ -212,7 +247,8 @@ Max speed = highest scanned speed where `P_engine ≤ P_max`.
 | 2 | Linear (small-angle) gust response; warning above `limits.maxGustAlphaDeg` | `model.js planeSystem` |
 | 3 | CG fixed during fuel burn; trim/L-D evaluated at m0 | `model.js analyze` |
 | 4 | Hull lift neglected (Munk moment kept); fin–hull interference ignored | `model.js pointAt` |
-| 5 | Cruciform reuses the same pairs in yaw; no roll axis (dihedral effect, spiral/Dutch roll) | `design.tailType` |
+| 5 | Cruciform reuses the same pairs in yaw | `design.tailType` |
+| 5b | Lateral: strip-theory derivatives; no I_xz, no wing vertical position (high/low wing) term, no sidewash, rolling gust on horizontal pairs only; linear (small bank) | `model.js lateralSystem / pairRollDerivs` |
 | 6 | "Wind" on the map is the original tool's atmospheric placeholder (future: currents) | `model.js envelope` |
 | 7 | Pitch damping only from fins + optional extra term | `extraPitchDamping_Nms` |
 | 8 | ITTC-57 + Hoerner form factor for hull drag | calibration panel / `model.js` |
