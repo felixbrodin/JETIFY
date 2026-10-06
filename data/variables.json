@@ -198,8 +198,8 @@
         "kind": "slider",
         "min": 0,
         "max": 2,
-        "step": 0.01,
-        "digits": 1
+        "step": 0.005,
+        "digits": 3
       },
       {
         "key": "cruiseSpeed_mps",

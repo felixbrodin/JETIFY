@@ -26,10 +26,10 @@
     "maxGustAlphaDeg": 10
   },
   "environmentDefaults": {
-    "density_kgpm3": 1005,
+    "density_kgpm3": 1.225,
     "cruiseSpeed_mps": 10,
     "reserveFraction": 0.1,
-    "kinematicViscosity_m2ps": 0.0000013,
+    "kinematicViscosity_m2ps": 0.0000146,
     "oswaldE": 0.8,
     "finCD0": 0.01,
     "finCLmax": 1,
