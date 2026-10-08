@@ -230,6 +230,15 @@
     $("useVehicleResponse").checked = state.env.useVehicleResponse !== false;
     $("includeQPenalty").checked = !!state.env.includeQPenalty;
     $("turbPlaceholder").classList.toggle("hidden", !state.model.turbulence.placeholder);
+    $("useISA").checked = state.env.useISA !== false;
+    applyISA();
+  }
+
+  // With ISA on, density / viscosity / speed of sound come from the altitude: lock the manual fields.
+  function applyISA() {
+    const on = state.env.useISA !== false;
+    ["density_kgpm3", "kinematicViscosity_m2ps", "speedOfSound_mps"].forEach(k => { const el = $("f_" + k); if (el) el.disabled = on; });
+    const alt = $("f_altitude_m"); if (alt) alt.disabled = !on;
   }
 
   const COMPASS = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"];
@@ -352,6 +361,10 @@
       return;
     }
     const c = r.chosen, ctx = r.ctx;
+    const atm = ctx.atm;
+    $("isaInfo").textContent = atm
+      ? "ISA at " + fmt(atm.h, 0) + " m: T " + fmt(atm.T - 273.15, 1) + " °C, ρ " + fmt(atm.rho, 4) + " kg/m³, ν " + atm.nu.toExponential(2) + " m²/s, a " + fmt(atm.a, 1) + " m/s · M " + fmt(c.Mach, 3) + " · available power ×" + fmt(ctx.powerFactor, 3)
+      : "Manual medium: ρ " + fmt(ctx.rho, 2) + " kg/m³, a " + fmt(ctx.a, 0) + " m/s · M " + fmt(c.Mach, 4);
     $("rangeBig").textContent = fmt(c.rangeKm, 1);
     $("rangeSub").textContent = "at " + fmt(c.V, 2) + " m/s" + (c.feasible ? "" : " – NOT reachable with available power");
     const hrs = c.enduranceH, h = Math.floor(hrs), m = Math.round((hrs - h) * 60);
@@ -400,7 +413,7 @@
     $("pdLD").textContent = fmt(c.LD, 3);
     $("pdVmax").textContent = r.vMax != null ? fmt(r.vMax, 2) + " m/s" : "none in scan";
     $("pdBest").textContent = r.best ? fmt(r.best.V, 2) + " m/s → " + fmt(r.best.rangeKm, 1) + " km" : "–";
-    const parts = [["Hull", D.hull], ["Fin profile", D.finProfile], ["Trim induced", D.trim], ["Gust vert.", D.gustV], ["Gust lat.", D.gustL], ["Extra", D.extra]];
+    const parts = [["Hull", D.hull], ["Fin profile", D.finProfile], ["Trim induced", D.trim], ["Gust vert.", D.gustV], ["Gust lat.", D.gustL], ["Wave", D.wave], ["Extra", D.extra]];
     $("dragBreakdown").innerHTML = parts.map(([n, v]) => "<div class='stat'><span>" + n + "</span><b>" + fmt(v, 1) + " N</b><em>" + fmt(v / D.total * 100, 0) + " %</em></div>").join("");
 
     // Warnings
@@ -498,8 +511,10 @@
     let yMin = Math.min(...pts.map(p => ty(p.y))), yMax = Math.max(...pts.map(p => ty(p.y)));
     (opts.hlines || []).forEach(h => { yMin = Math.min(yMin, h); yMax = Math.max(yMax, h); });
     if (!opts.logY && opts.zeroBase !== false) yMin = Math.min(0, yMin);
-    if (yMax - yMin < 1e-12) { yMax = yMin + 1; }
-    if (xMax - xMin < 1e-12) { xMax = xMin + 1; }
+    // Flat range: widen relative to the magnitude (yMin + 1 is a no-op for huge values).
+    const widen = (lo, hi) => hi - lo > 1e-9 * Math.max(1, Math.abs(hi)) ? [lo, hi] : [lo - Math.max(0.5, Math.abs(lo) * 0.05), hi + Math.max(0.5, Math.abs(hi) * 0.05)];
+    [yMin, yMax] = widen(yMin, yMax);
+    [xMin, xMax] = widen(xMin, xMax);
     const X = (x) => padL + (tx(x) - xMin) / (xMax - xMin) * vw;
     const Y = (y) => padT + (yMax - ty(y)) / (yMax - yMin) * vh;
     const tickTxt = (v, log) => log ? "10^" + Math.round(v) : fmt(v, Math.abs(v) < 10 ? 2 : 0);
@@ -510,7 +525,9 @@
       if (log) { const out = []; for (let v = Math.ceil(lo); v <= Math.floor(hi); v++) out.push(v); return out.length > 1 ? out : [lo, hi]; }
       const raw = (hi - lo) / n, mag = Math.pow(10, Math.floor(Math.log10(raw)));
       const step = [1, 2, 5, 10].map(f => f * mag).find(s => s >= raw);
-      const out = []; for (let v = Math.ceil(lo / step) * step; v <= hi + 1e-9 * step; v += step) out.push(Math.abs(v) < 1e-12 ? 0 : v);
+      if (!(step > 0) || !Number.isFinite(step)) return [lo, hi];   // degenerate axis – never loop on a zero step
+      const out = [];
+      for (let v = Math.ceil(lo / step) * step, k = 0; v <= hi + 1e-9 * step && k < 50; v += step, k++) out.push(Math.abs(v) < 1e-12 ? 0 : v);
       return out;
     };
     const Yt = (t) => padT + (yMax - t) / (yMax - yMin) * vh, Xt = (t) => padL + (t - xMin) / (xMax - xMin) * vw;
@@ -617,6 +634,25 @@
       hlines: [0], zeroBase: false,
       fmtY: (y) => fmt(y, 1) + " %"
     });
+    const E = r.altEnvelope;
+    if (!E) $("chartAlt").innerHTML = "<p class='hint'>The altitude envelope needs the ISA atmosphere (air) – tick “Use ISA”.</p>";
+    else {
+      const km = (h) => h == null ? NaN : h / 1000;
+      makeChart($("chartAlt"), {
+        title: "Flight envelope (steady level flight)",
+        series: [
+          { name: "Ceiling", cls: "s1", data: E.points.map(p => ({ x: p.V, y: km(p.hMax) })) },
+          { name: "Floor", cls: "s2", data: E.points.map(p => ({ x: p.V, y: p.hMin > 0 ? km(p.hMin) : NaN })) },
+          { name: "Stall limit", cls: "s3", data: E.points.map(p => ({ x: p.V, y: p.hStall != null && p.hStall < E.hTop ? km(p.hStall) : NaN })) },
+          { name: "Power / Mach limit", cls: "s4", data: E.points.map(p => ({ x: p.V, y: p.hPower != null && p.hPower < E.hTop ? km(p.hPower) : NaN })) }
+        ],
+        xLabel: "Speed (m/s)", yLabel: "Altitude (km)",
+        markers: [{ x: c.V, label: "cruise " + fmt(c.V, 0) + " m/s" }],
+        hlines: ctx.atm ? [ctx.atm.h / 1000] : [],
+        fmtY: (y) => fmt(y, 2) + " km",
+        empty: "No speed in the scan allows steady level flight at any altitude up to " + fmt(E.hTop / 1000, 0) + " km."
+      });
+    }
     makeChart($("chartSpec"), {
       title: "Incidence spectrum: raw gust vs felt at " + (r.ctx.rear ? "rear pair" : "wing"),
       series: [
@@ -816,6 +852,7 @@
       buildVehicleSelect(); loadProfile(v); schedule();
       flash("Saved: " + name);
     });
+    on("useISA", "change", () => { state.env.useISA = $("useISA").checked; applyISA(); schedule(); });
     on("rollFree", "change", () => { state.design.rollFree = $("rollFree").checked; schedule(); });
     on("tailType", "change", () => { state.design.tailType = $("tailType").value; applyTailType(); schedule(); });
     on("downwash", "change", () => { state.design.downwash = $("downwash").checked; schedule(); });

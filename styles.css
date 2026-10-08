@@ -235,7 +235,13 @@ details.card summary::-webkit-details-marker { color: var(--acc); }
 :root {
   --series-1: #3987e5;   /* validated (dataviz validator, dark surface #1b2436) */
   --series-2: #d95926;
+  --series-3: #8d6ad8;   /* envelope chart: stall limit */
+  --series-4: #2a9d8f;   /* envelope chart: power / Mach limit */
 }
+.chart-line.s3 { stroke: var(--series-3); stroke-dasharray: 5 4; }
+.chart-line.s4 { stroke: var(--series-4); stroke-dasharray: 2 3; }
+.tip-key.s3 { border-color: var(--series-3); }
+.tip-key.s4 { border-color: var(--series-4); }
 .grow { flex: 1 1 auto; }
 .wide { grid-column: 1 / -1; }
 .hero-row.three { grid-template-columns: repeat(3, 1fr); }

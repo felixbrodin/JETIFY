@@ -121,9 +121,12 @@ result as justification.
 ## 3. Drag build-up
 
 ```
-D = D_hull + D_fin,profile + D_trim + D_gust,vert + D_gust,lat + D_extra
-D_hull        = q_p·S_wet·Cf(Re)·FF            Cf = 0.075/(log10 Re − 2)²   (ITTC-57)
+D = D_hull + D_fin,profile + D_trim + D_gust,vert + D_gust,lat + D_wave + D_extra
+D_hull        = q_p·S_wet·Cf(Re)·FF·(1 + 0.144M²)^−0.65
+                                               Cf = 0.075/(log10 Re − 2)²   (ITTC-57)
                                                FF = 1 + 1.5/λ^1.5 + 7/λ³    (Hoerner)
+                                               last factor: compressible turbulent friction (Raymer)
+D_wave        = Σ q·S_i·CD_wave,i            Korn/Lock, see "Compressibility" below
 D_fin,profile = q_p·ΣCD0_i·S_i·(2 if cruciform)
 D_trim        = Σ q·S_i·CDi_i(α_i)          conventional: CL²/(π·e_i·AR_i); delta: CL·tanα
 D_gust        = Σ q·S_i·½·CDi_i''·σ²_α,i     conventional: CLα²σ²/(π·e·AR) ← the script's turbulent drag growth
@@ -137,6 +140,30 @@ script (agreement < 1 %).
 `q_p = q` unless "dynamic-pressure penalty" is enabled, then
 `q_p = ½ρ(V0² + σ²_u,eff + σ²_v,eff + σ²_w,eff)` (hull-length filtered).
 The script ignores this effect; it is off by default.
+
+### Atmosphere and compressibility
+
+* **ISA** (default, `useISA`): from the altitude input, troposphere `T = 288.15 − 0.0065h`,
+  isothermal 216.65 K above 11 km (to 20 km); ρ from the ideal-gas law, ν from Sutherland,
+  `a = √(1.4·R·T)`. ISA off = manual ρ, ν and speed of sound (water: a ≈ 1480 m/s → M ≈ 0).
+* **Prandtl–Glauert** in the DATCOM slope, β = √(1 − M²) (M capped at 0.95):
+  `CLα = 2πAR / (2 + √(AR²β²/κ²·(1 + tan²Λ½c/β²) + 4))`, κ = a0/2π. Applies to every pair and
+  the fin (and so to the delta's Kp); the downwash gradient is scaled by CLα,M/CLα,0 (DATCOM).
+* **Drag divergence** per surface (Korn equation, Mason's form) and **wave drag** (Lock):
+  `M_dd = κ_A/cosΛ¼c − (t/c)/cos²Λ¼c − CL/(10cos³Λ¼c)`, `M_crit = M_dd − (0.1/80)^{1/3}`,
+  `CD_wave = 20(M − M_crit)⁴` for M > M_crit. t/c and κ_A from `data/sections.json`
+  (κ_A 0.87 conventional, 0.95 supercritical; ideal 2π section: t/c from model.json).
+* Section Re and Mach are evaluated at each speed of the speed scan (re-resolved per speed).
+* **Engine power lapse**: `P_avail = P_max·σ^n`, σ = ρ/ρ0, n = `model.json → engine.powerLapseExponent`
+  (0.7, turbine-like). Manual (ISA off): no lapse.
+
+### Flight envelope (altitude vs speed chart)
+
+Calm air, take-off mass, ISA. For each speed (`atmosphere.envelopeSpeedSteps`) the altitudes
+0–20 km (`envelopeAltitudeSteps`, edges refined by bisection) are checked for steady level
+flight: trim L = W without stall (CLmax, delta stall α), engine power for the calm-air drag
+≤ P_max·σ^n, and M ≤ 0.95. Plotted: ceiling and floor of the flyable band, plus the
+stall-limited and power/Mach-limited ceilings separately.
 
 ## 4. Turbulence – frequency domain
 
@@ -252,7 +279,7 @@ Max speed = highest scanned speed where `P_engine ≤ P_max`.
 | 6 | "Wind" on the map is the original tool's atmospheric placeholder (future: currents) | `model.js envelope` |
 | 7 | Pitch damping only from fins + optional extra term | `extraPitchDamping_Nms` |
 | 8 | ITTC-57 + Hoerner form factor for hull drag | calibration panel / `model.js` |
-| 9 | No compressibility; trapezoidal planforms only (no cranked/double delta); no wing–body carry-over | `model.js planform` |
+| 9 | Compressibility: Prandtl–Glauert + Korn/Lock only (no shocks, no transonic CLmax/buffet, no hull/body wave drag, invalid above M ≈ 0.95); trapezoidal planforms only (no cranked/double delta); no wing–body carry-over | `model.js planform` |
 | 10 | Delta: Polhamus Kv and stall α are single global values | `data/model.json → delta` |
 | 11 | Downwash: DATCOM empirical formula, vertical plane only, no downwash lag in the eigenvalues | `model.js downwashGradient` |
 | 12 | Tailless: elevon trim drag and Cm0 (reflex) not modelled; V-tail: no panel interference | `model.js trim` |

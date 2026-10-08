@@ -93,15 +93,56 @@ const Model = (() => {
     return 0.075 / (l * l);
   }
 
+  // ---------- Atmosphere (ISA, 0–20 km) ----------
+  // Troposphere T = 288.15 − 0.0065·h, isothermal 216.65 K above 11 km; Sutherland viscosity.
+  function isa(h) {
+    const R = 287.05, g0 = 9.80665;
+    const hh = Math.max(0, Math.min(h || 0, 20000));
+    let T, p;
+    if (hh <= 11000) { T = 288.15 - 0.0065 * hh; p = 101325 * Math.pow(T / 288.15, g0 / (0.0065 * R)); }
+    else { T = 216.65; p = 22632.06 * Math.exp(-g0 * (hh - 11000) / (R * T)); }
+    const rho = p / (R * T);
+    const mu = 1.458e-6 * Math.pow(T, 1.5) / (T + 110.4);
+    return { h: hh, T, p, rho, mu, nu: mu / rho, a: Math.sqrt(1.4 * R * T), sigma: rho / 1.225 };
+  }
+
+  // useISA (default): density, viscosity and speed of sound from the altitude; otherwise the
+  // manual values (water: ρ ≈ 1005, ν ≈ 1.3e-6, a ≈ 1480).
+  function resolveAtmosphere(env) {
+    if (env.useISA === false) return { ...env, speedOfSound_mps: env.speedOfSound_mps || 1480, atm: null };
+    const atm = isa(env.altitude_m);
+    return { ...env, density_kgpm3: atm.rho, kinematicViscosity_m2ps: atm.nu, speedOfSound_mps: atm.a, atm };
+  }
+
   // ---------- Control-surface pairs ----------
-  // Generalised Helmbold / DATCOM lift-curve slope [1/rad] (incompressible):
-  //   CLα = 2πAR / (2 + √(AR²/κ²·(1 + tan²Λ½c) + 4)),  κ = a0/2π.
-  // With a0 = 2π and Λ = 0 this is the classic 2πAR/(2+√(AR²+4)).
-  const helmbold = (AR, a0, tanHalfChord) => {
+  // DATCOM lift-curve slope [1/rad] with Prandtl–Glauert compressibility, β = √(1 − M²):
+  //   CLα = 2πAR / (2 + √(AR²β²/κ²·(1 + tan²Λ½c/β²) + 4)),  κ = a0/2π (a0 = incompressible section slope).
+  // M = 0, Λ = 0, a0 = 2π gives the classic Helmbold 2πAR/(2+√(AR²+4)). M is capped at MACH_CAP.
+  const MACH_CAP = 0.95;
+  const helmbold = (AR, a0, tanHalfChord, M) => {
     const k = (a0 != null ? a0 : 2 * Math.PI) / (2 * Math.PI);
     const t = tanHalfChord || 0;
-    return 2 * Math.PI * AR / (2 + Math.sqrt(AR * AR / (k * k) * (1 + t * t) + 4));
+    const m = Math.min(Math.max(M || 0, 0), MACH_CAP), b2 = 1 - m * m;
+    return 2 * Math.PI * AR / (2 + Math.sqrt(AR * AR * b2 / (k * k) * (1 + t * t / b2) + 4));
   };
+
+  // Drag divergence (Korn equation, Mason's form) and wave drag (Lock's 4th-power law):
+  //   M_dd = κ_A/cosΛ − (t/c)/cos²Λ − CL/(10·cos³Λ),  M_crit = M_dd − (0.1/80)^(1/3),
+  //   CD_wave = 20·(M − M_crit)⁴ for M > M_crit.   κ_A ≈ 0.87 conventional, 0.95 supercritical.
+  function waveDrag(pair, CL, M) {
+    const c = 1 / Math.sqrt(1 + pair.pf.tanQc * pair.pf.tanQc);
+    const Mdd = pair.kappaA / c - pair.tc / (c * c) - Math.abs(CL) / (10 * c * c * c);
+    const Mcrit = Mdd - Math.cbrt(0.1 / 80);
+    return { Mdd, Mcrit, CD: M > Mcrit ? 20 * Math.pow(M - Mcrit, 4) : 0 };
+  }
+
+  // Section thickness and Korn factor (ideal 2π section: thickness from model.json).
+  function compressData(sec, model) {
+    const cm = (model && model.compressibility) || {};
+    const tc = sec && sec.thickness_pct > 0 ? sec.thickness_pct / 100 : (cm.idealSectionThickness != null ? cm.idealSectionThickness : 0.1);
+    const kappaA = sec && sec.kornKappa != null ? sec.kornKappa : (cm.defaultKornKappa != null ? cm.defaultKornKappa : 0.87);
+    return { tc, kappaA };
+  }
 
   // 2D section data at chord Reynolds number Re: linear in log10(Re), clamped to the data range.
   function sectionAt(sec, Re) {
@@ -162,16 +203,18 @@ const Model = (() => {
     const nu = env.kinematicViscosity_m2ps, V = env.cruiseSpeed_mps;
     const Re = V > 0 && nu > 0 ? V * pf.mac / nu : null;
     const s2 = sec ? sectionAt(sec, Re) : { clAlpha: 2 * Math.PI, cdMin: null, clMax: null };
-    const clAlpha = clAlphaOverride != null ? clAlphaOverride : helmbold(AR, s2.clAlpha, pf.tanHc);
+    const M = env.speedOfSound_mps > 0 ? V / env.speedOfSound_mps : 0;
+    const clAlpha = clAlphaOverride != null ? clAlphaOverride : helmbold(AR, s2.clAlpha, pf.tanHc, M);
+    const clAlpha0 = clAlphaOverride != null ? clAlphaOverride : helmbold(AR, s2.clAlpha, pf.tanHc, 0);
     const cd0 = s2.cdMin != null ? s2.cdMin : env.finCD0;
     const e = design[n + "OswaldE"] != null && design[n + "OswaldE"] > 0 ? design[n + "OswaldE"] : env.oswaldE;
     const kind = design[n + "Planform"] === "delta" ? "delta" : "conventional";
     const dm = (model && model.delta) || {};
     const pair = {
-      n, area, AR, pf, span: pf.b, chord: pf.mac, xcl: pf.xAc25, clAlpha, cd0, e, kind,
+      n, area, AR, pf, span: pf.b, chord: pf.mac, xcl: pf.xAc25, clAlpha, clAlpha0, M, cd0, e, kind, ...compressData(sec, model),
       Kv: dm.Kv != null ? dm.Kv : Math.PI, stallAlpha: (dm.stallAlphaDeg != null ? dm.stallAlphaDeg : 30) / DEG,
       section: { id: sec ? sec.id : "ideal", name: sec ? sec.name : "Ideal thin airfoil (2π)", confidence: sec ? sec.confidence : "typical", Re, a0: s2.clAlpha, cdMin: s2.cdMin, clMax2D: s2.clMax },
-      clAlphaSrc: clAlphaOverride != null ? "empirical" : "DATCOM(AR, Λ½c, a0)"
+      clAlphaSrc: clAlphaOverride != null ? "empirical" : "DATCOM(AR, Λ½c, a0, M)"
     };
     const cosQc = 1 / Math.sqrt(1 + pf.tanQc * pf.tanQc);
     pair.clMax = kind === "delta" ? deltaCL(pair, pair.stallAlpha)
@@ -192,9 +235,10 @@ const Model = (() => {
     const Re = V > 0 && nu > 0 ? V * pf.mac / nu : null;
     const s2 = sec ? sectionAt(sec, Re) : { clAlpha: 2 * Math.PI, cdMin: null, clMax: null };
     const cosQc = 1 / Math.sqrt(1 + pf.tanQc * pf.tanQc);
+    const M = env.speedOfSound_mps > 0 ? V / env.speedOfSound_mps : 0;
     return {
-      n: "fin", area: S, AR: ARe, ARgeo: ARg, pf, span: pf.b / 2, chord: pf.mac, xcl: pf.xAc25,
-      clAlpha: helmbold(ARe, s2.clAlpha, pf.tanHc), cd0: s2.cdMin != null ? s2.cdMin : env.finCD0, e: env.oswaldE, kind: "conventional",
+      n: "fin", area: S, AR: ARe, ARgeo: ARg, pf, span: pf.b / 2, chord: pf.mac, xcl: pf.xAc25, M, ...compressData(sec, model),
+      clAlpha: helmbold(ARe, s2.clAlpha, pf.tanHc, M), clAlpha0: helmbold(ARe, s2.clAlpha, pf.tanHc, 0), cd0: s2.cdMin != null ? s2.cdMin : env.finCD0, e: env.oswaldE, kind: "conventional",
       clMax: s2.clMax != null ? CLMAX_3D * s2.clMax * cosQc : env.finCLmax,
       section: { id: sec ? sec.id : "ideal", name: sec ? sec.name : "Ideal thin airfoil (2π)", confidence: sec ? sec.confidence : "typical", Re, a0: s2.clAlpha, cdMin: s2.cdMin, clMax2D: s2.clMax },
       clAlphaSrc: "DATCOM(AR_eff, Λ½c, a0)"
@@ -247,7 +291,7 @@ const Model = (() => {
     const KH = (1 - Math.abs(ctx.tailHeight) / pf.b) / Math.cbrt(2 * lH / pf.b);
     if (!(KH > 0) || !(KA > 0)) return { E: 0, lH };
     const cosQc = 1 / Math.sqrt(1 + pf.tanQc * pf.tanQc);
-    const E0 = 4.44 * Math.pow(KA * Kl * KH * Math.sqrt(cosQc), 1.19) * (fs.slope / f.clAlpha);
+    const E0 = 4.44 * Math.pow(KA * Kl * KH * Math.sqrt(cosQc), 1.19) * (fs.slope / f.clAlpha) * (f.clAlpha / f.clAlpha0);
     return { E: Math.min(E0, 0.95), E0, lH, capped: E0 > 0.95 };
   }
 
@@ -631,6 +675,9 @@ const Model = (() => {
     const etaJet = c.etaJet != null ? c.etaJet : design.jetEfficiency;
     return {
       g, rho, hull, front, rear, fin, tailType, proj, m0, mEnd, W, xcg, I0, Iadd, mAdd, An, etaJet,
+      a: env.speedOfSound_mps || 340.29, atm: env.atm || null,
+      // Available engine power ∝ σ^n with altitude (ISA only; model.json engine.powerLapseExponent).
+      powerFactor: env.atm ? Math.pow(env.atm.sigma, (model.engine && model.engine.powerLapseExponent != null) ? model.engine.powerLapseExponent : 0.7) : 1,
       Ix, Iz: Iz0 + Iadd, Kphi: design.extraRollStiffness_Nmprad || 0, rollFree: design.rollFree !== false, wingDihedral: (design.frontDihedral_deg || 0) / DEG,
       vtailDihedral: tailType === "vtail" ? (design.rearDihedral_deg || 0) / DEG : 0,
       nu: env.kinematicViscosity_m2ps,
@@ -715,6 +762,72 @@ const Model = (() => {
     return { vert, lat, vTags, lTags };
   }
 
+  // Turbulent skin friction compressibility factor (Raymer): Cf ∝ (1 + 0.144·M²)^−0.65.
+  const compressibleCf = (M) => Math.pow(1 + 0.144 * M * M, -0.65);
+
+  // Wave drag of all lifting surfaces (CD·S summed), per surface Korn/Lock data.
+  function waveTerms(ctx, tr, M) {
+    const list = [{ name: "front", pair: ctx.front, CL: tr.CLf }];
+    if (ctx.rear) list.push({ name: ctx.tailType === "vtail" ? "V-tail" : "rear", pair: ctx.rear, CL: tr.CLr });
+    if (ctx.cruciform) { list.push({ name: "front (vert.)", pair: ctx.front, CL: 0 }); if (ctx.rear) list.push({ name: "rear (vert.)", pair: ctx.rear, CL: 0 }); }
+    if (ctx.fin) list.push({ name: "fin", pair: ctx.fin, CL: 0 });
+    const surfaces = list.map(t => ({ ...t, ...waveDrag(t.pair, t.CL, M) }));
+    return { surfaces, CDA: surfaces.reduce((a, t) => a + t.CD * t.pair.area, 0) };
+  }
+
+  // Calm-air drag of steady level flight (no turbulence) – used for the altitude envelope.
+  function calmDrag(ctx, V, tr) {
+    const qbar = 0.5 * ctx.rho * V * V, M = V / ctx.a;
+    const Cf = ittcCf(V * ctx.hull.L / ctx.nu) * compressibleCf(M);
+    const CDwet = ctx.hullCDwetOverride != null ? ctx.hullCDwetOverride : Cf * ctx.hull.formFactor;
+    const prof = (ctx.front.cd0 * ctx.front.area + (ctx.rear ? ctx.rear.cd0 * ctx.rear.area : 0)) * (ctx.cruciform ? 2 : 1) + (ctx.fin ? ctx.fin.cd0 * ctx.fin.area : 0);
+    const induced = ctx.front.area * tr.fs.CDi + (ctx.rear ? ctx.rear.area * tr.rs.CDi : 0);
+    return qbar * (ctx.hull.wetted * CDwet + prof + induced + ctx.extraDragArea + waveTerms(ctx, tr, M).CDA);
+  }
+
+  // Flight envelope (ISA, calm air, take-off mass): for each speed, the band of altitudes where
+  // level flight is possible – L = W without exceeding CLmax, engine power required ≤ available
+  // (P_max·σ^n) and M ≤ MACH_CAP. Also the stall-limited and power-limited ceilings separately.
+  function altitudeEnvelope(design, env, model, calib, opts) {
+    if (env.useISA === false) return null;
+    const am = model.atmosphere || {};
+    const hTop = am.envelopeMaxAltitude_m || 20000, nH = am.envelopeAltitudeSteps || 40, nV = am.envelopeSpeedSteps || 40;
+    const pr = model.presets, v0 = pr.speedScanMin_mps, v1 = pr.speedScanMax_mps;
+    const check = (V, h) => {
+      const e = resolveAtmosphere({ ...env, altitude_m: h, cruiseSpeed_mps: V });
+      const c = resolve(design, e, model, calib);
+      const tr = trim(c, 0.5 * c.rho * V * V);
+      const stall = !!(tr.fs.stalled || (tr.rs && tr.rs.stalled));
+      const P = jetForThrust(calmDrag(c, V, tr), V, c.rho, c.An).Pjet / c.etaJet;
+      const power = P <= opts.maxPower_W * c.powerFactor && V / c.a <= MACH_CAP;
+      return { stall, power, ok: !stall && power };
+    };
+    // Boundary between a passing altitude `pass` and a failing altitude `fail` (bisection, dh/64).
+    const edge = (V, pass, fail, test) => {
+      for (let k = 0; k < 6; k++) { const m = (pass + fail) / 2; if (test(check(V, m))) pass = m; else fail = m; }
+      return pass;
+    };
+    const dh = hTop / nH, points = [];
+    for (let i = 0; i <= nV; i++) {
+      const V = v0 + (v1 - v0) * i / nV;
+      let hMin = null, hMax = null, hStall = null, hPower = null;
+      const res = [];
+      for (let j = 0; j <= nH; j++) res.push(check(V, dh * j));
+      res.forEach((c, j) => {
+        if (!c.stall) hStall = dh * j;
+        if (c.power) hPower = dh * j;
+        if (c.ok) { if (hMin == null) hMin = dh * j; hMax = dh * j; }
+      });
+      // Refine the coarse grid where a boundary lies inside the range.
+      if (hMax != null && hMax < hTop) hMax = edge(V, hMax, hMax + dh, c => c.ok);
+      if (hMin != null && hMin > 0) hMin = edge(V, hMin, hMin - dh, c => c.ok);
+      if (hStall != null && hStall < hTop) hStall = edge(V, hStall, hStall + dh, c => !c.stall);
+      if (hPower != null && hPower < hTop) hPower = edge(V, hPower, hPower + dh, c => c.power);
+      points.push({ V, hMin, hMax, hStall, hPower });
+    }
+    return { points, hTop };
+  }
+
   // Everything at one speed. opts.withDynamics: use vehicle response in drag/load penalty.
   function pointAt(V, ctx, env, model, opts) {
     const sp = model.spectral;
@@ -751,7 +864,8 @@ const Model = (() => {
 
     // Drag build-up
     const Re = V * ctx.hull.L / ctx.nu;
-    const Cf = ittcCf(Re);
+    const Mach = V / ctx.a;
+    const Cf = ittcCf(Re) * compressibleCf(Mach);
     const CDwet = ctx.hullCDwetOverride != null ? ctx.hullCDwetOverride : Cf * ctx.hull.formFactor;
     const D_hull = qPar * ctx.hull.wetted * CDwet;
     const pairsCD0A = (ctx.front.cd0 * ctx.front.area + (ctx.rear ? ctx.rear.cd0 * ctx.rear.area : 0)) * (ctx.cruciform ? 2 : 1);
@@ -763,14 +877,16 @@ const Model = (() => {
     const D_gustV = surfV.reduce((a, t) => a + gust(t), 0);
     const D_gustL = surfL.reduce((a, t) => a + gust(t), 0);
     const D_extra = qPar * ctx.extraDragArea;
-    const D = D_hull + D_finProfile + D_trim + D_gustV + D_gustL + D_extra;
-    const D_calm = qbar * ctx.hull.wetted * CDwet + qbar * finCD0A + D_trim + qbar * ctx.extraDragArea;
+    const wave = waveTerms(ctx, tr, Mach);
+    const D_wave = qbar * wave.CDA;
+    const D = D_hull + D_finProfile + D_trim + D_gustV + D_gustL + D_extra + D_wave;
+    const D_calm = qbar * ctx.hull.wetted * CDwet + qbar * finCD0A + D_trim + qbar * ctx.extraDragArea + D_wave;
 
     // Propulsion
     const jet = jetForThrust(D, V, ctx.rho, ctx.An);
     const P_engine = jet.Pjet / ctx.etaJet;
     const etaTot = ctx.etaJet * jet.etaF;
-    const Pmax = opts.maxPower_W;
+    const Pmax = opts.maxPower_W * ctx.powerFactor;
     const avail = thrustForJetPower(Pmax * ctx.etaJet, V, ctx.rho, ctx.An);
     const throttle = Pmax > 0 ? P_engine / Pmax : Infinity;
 
@@ -785,7 +901,8 @@ const Model = (() => {
     return {
       V, qbar, qPar, Re, Cf, CDwet, split, CLf, CLr, trim: tr, hasYaw, surfV, surfL,
       vert, lat, sv, sl, useDynV, useDynL,
-      drag: { hull: D_hull, finProfile: D_finProfile, trim: D_trim, gustV: D_gustV, gustL: D_gustL, extra: D_extra, total: D, calm: D_calm },
+      drag: { hull: D_hull, finProfile: D_finProfile, trim: D_trim, gustV: D_gustV, gustL: D_gustL, extra: D_extra, wave: D_wave, total: D, calm: D_calm },
+      Mach, wave, Pavail: Pmax,
       jet, P_engine, etaTot, avail, throttle, feasible: throttle <= 1,
       LD, lnM, rangeKm: rangeM / 1000, enduranceH: rangeM / V / 3600, cEq_perHour, fuelFlow_kgph,
       phiW, phiV, phiP
@@ -797,6 +914,7 @@ const Model = (() => {
     if (!design || !(design.hullLength_m > 0) || !(design.hullDiameter_m > 0)) return null;
     if (!(design.frontArea_m2 > 0) || !(design.rearArea_m2 > 0) || !(design.nozzleDiameter_m > 0)) return null;
     design = normalizeDesign(design, model);
+    env = resolveAtmosphere(env);
     const ctx = resolve(design, env, model, calib);
     const opts = {
       withDynamics: env.useVehicleResponse !== false,
@@ -810,7 +928,8 @@ const Model = (() => {
     const scan = [];
     let best = null, vMax = null;
     for (let V = pr.speedScanMin_mps; V <= pr.speedScanMax_mps + 1e-9; V += pr.speedScanStep_mps) {
-      const p = pointAt(V, ctx, env, model, opts);
+      // Section Re and Mach depend on speed → context per speed.
+      const p = pointAt(V, resolve(design, { ...env, cruiseSpeed_mps: V }, model, calib), env, model, opts);
       scan.push({ V: round(V, 3), rangeKm: p.rangeKm, feasible: p.feasible, P_kW: p.P_engine / 1000, D: p.drag.total });
       if (p.feasible) {
         vMax = V;
@@ -887,6 +1006,10 @@ const Model = (() => {
       if (Number.isFinite(y) && y > 300)
         warnings.push(`RMS ${n} track wander after 1 km ≈ ${round(y, 0)} m exceeds 30 % of the distance – beyond small-angle theory: without control the vehicle does not hold its course. Use the mode data (stability, damping, time constants) rather than the wander figure.`);
     });
+    if (chosen.Mach > MACH_CAP)
+      warnings.push(`Mach ${round(chosen.Mach, 2)} > ${MACH_CAP}: transonic/supersonic – Prandtl–Glauert and the Korn/Lock wave-drag model are not valid here.`);
+    else if (chosen.wave.CDA > 0)
+      warnings.push(`Wave drag active at M ${round(chosen.Mach, 3)}: ${chosen.wave.surfaces.filter(t => t.CD > 0).map(t => t.name + " (M_crit " + round(t.Mcrit, 3) + ")").join(", ")} – ${round(chosen.drag.wave, 1)} N.`);
     if (!chosen.feasible)
       warnings.push(`Cruise speed ${round(chosen.V, 1)} m/s needs ${round(chosen.P_engine / 1000, 1)} kW engine power – above the ${round(design.maxPower_kW, 1)} kW available.`);
     if (staticMargin_m <= 0)
@@ -935,6 +1058,8 @@ const Model = (() => {
     // ---------- Pedagogical steps ----------
     const D = chosen.drag;
     const steps = [
+      { t: "Atmosphere", d: (ctx.atm ? `ISA h = ${round(ctx.atm.h, 0)} m: T ${round(ctx.atm.T - 273.15, 1)} °C, ρ ${round(ctx.rho, 4)} kg/m³, ν ${ctx.nu.toExponential(3)} m²/s, a ${round(ctx.a, 1)} m/s, σ ${round(ctx.atm.sigma, 3)} → available power ×${round(ctx.powerFactor, 3)}` : `manual: ρ ${round(ctx.rho, 2)} kg/m³, ν ${ctx.nu.toExponential(3)} m²/s, a ${round(ctx.a, 0)} m/s`) + ` · M = ${round(chosen.Mach, 3)}, β = ${round(Math.sqrt(Math.max(0, 1 - Math.min(chosen.Mach, MACH_CAP) ** 2)), 3)}` },
+      { t: "Compressibility", d: chosen.wave.surfaces.map(t => `${t.name}: t/c ${round(t.pair.tc, 3)}, κ_A ${t.pair.kappaA}, M_dd ${round(t.Mdd, 3)}, M_crit ${round(t.Mcrit, 3)}, CD_wave ${t.CD.toExponential(2)}`).join(" · ") + ` · CLα front ${round(ctx.front.clAlpha0, 2)} → ${round(ctx.front.clAlpha, 2)}/rad (PG) · hull Cf ×${round(compressibleCf(chosen.Mach), 3)}` },
       { t: "Mass", d: `m0 = ${round(ctx.m0, 2)} kg (empty ${round(design.emptyMass_kg, 2)} + payload ${round(env.payload_kg || 0, 2)} + fuel ${round(design.fuelMass_kg, 2)}); m_end = ${round(ctx.mEnd, 2)} kg (reserve ${round(env.reserveFraction * 100, 0)} % of fuel)` },
       { t: "Hull", d: `L/D = ${round(ctx.hull.lam, 2)}, S_wet = ${round(ctx.hull.wetted, 3)} m², Vol = ${round(ctx.hull.volume * 1000, 1)} L, Re = ${chosen.Re.toExponential(2)}, Cf = ${round(chosen.Cf, 5)}, FF = ${round(ctx.hull.formFactor, 3)}` },
       { t: "Tail", d: { traditional: "traditional – horizontal tail (rear pair) + vertical fin", vtail: `V-tail – rear pair at dihedral Γ ${round(Math.acos(ctx.proj.rear.pitch) * DEG, 1)}° (pitch cos²Γ = ${round(ctx.proj.rear.pitch ** 2, 3)}, yaw sin²Γ = ${round(ctx.proj.rear.yaw ** 2, 3)})`, tailless: "tailless – wing only (elevon trim) + optional vertical fin", cruciform: "cruciform – both pairs also act in yaw" }[ctx.tailType] + (ctx.fin ? `; fin S ${round(ctx.fin.area, 4)} m², h ${round(ctx.fin.span, 3)} m, AR_geo ${round(ctx.fin.ARgeo, 2)} → AR_eff ${round(ctx.fin.AR, 2)}, CLα ${round(ctx.fin.clAlpha, 2)}/rad, a.c. x ${round(ctx.fin.xcl, 3)} m` : "") },
@@ -956,6 +1081,7 @@ const Model = (() => {
       design, env, ctx, chosen, scan, best, vMax,
       xnp, staticMargin_m, staticMargin_pct, lateralStatic,
       disp, per1km, atRange, pathAngle, smSweep, smSweepOf, spectrum,
+      altEnvelope: altitudeEnvelope(design, env, model, calib, opts),
       warnings, steps
     };
   }
@@ -995,8 +1121,8 @@ const Model = (() => {
   return {
     analyze, envelope, round, presetsFromVariables,
     // exposed for tests / docs
-    normalizeDesign,
-    _internal: { phiLongitudinal, phiTransverse, phiRolling, charPoly, polyRoots, csolve, pairRollDerivs, lateralSystem, logGrid, lambCoefficients, helmbold, sectionAt, finPair, planform, liftState, deltaCL, downwashGradient, trim, jetForThrust, thrustForJetPower, ittcCf, hullGeometry, planeSystem, planeStats }
+    normalizeDesign, isa,
+    _internal: { waveDrag, altitudeEnvelope, resolveAtmosphere, phiLongitudinal, phiTransverse, phiRolling, charPoly, polyRoots, csolve, pairRollDerivs, lateralSystem, logGrid, lambCoefficients, helmbold, sectionAt, finPair, planform, liftState, deltaCL, downwashGradient, trim, jetForThrust, thrustForJetPower, ittcCf, hullGeometry, planeSystem, planeStats }
   };
 })();
 

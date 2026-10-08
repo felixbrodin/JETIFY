@@ -87,6 +87,8 @@
 
     <div class="card">
       <h2>5 · Environment & operation</h2>
+      <label class="check"><input id="useISA" type="checkbox"> Use ISA atmosphere at the altitude (air). Off = manual density, viscosity and speed of sound (e.g. water).</label>
+      <p class="hint" id="isaInfo"></p>
       <div id="box_environment"></div>
       <label class="check"><input id="useVehicleResponse" type="checkbox"> Include vehicle response in gust drag & loads (off = fixed attitude, as in the MATLAB script)</label>
       <label class="check"><input id="includeQPenalty" type="checkbox"> Include u/v/w dynamic-pressure drag penalty (the script ignores it)</label>
@@ -243,6 +245,11 @@
     <div class="card">
       <h2>Static margin vs rear-pair position</h2>
       <div class="chart" id="chartSM"></div>
+    </div>
+    <div class="card">
+      <h2>Flight envelope – altitude vs speed</h2>
+      <div class="chart" id="chartAlt"></div>
+      <p class="hint">Steady level flight in calm air at take-off mass (ISA): L = W within CLmax, engine power required ≤ available (P_max·σ^n), M ≤ 0.95. Flyable: between floor and ceiling.</p>
     </div>
     <div class="card">
       <h2>Gust spectrum – raw vs felt at rear pair</h2>

@@ -176,7 +176,7 @@ test("delta (Polhamus): small-α slope = Kp, vortex lift adds slope, CDi = CL·t
 });
 
 test("downwash: plausible gradient for a conventional wing + tail, and it lowers the static margin", () => {
-  const ctx = { downwash: true, tailHeight: 0, front: { AR: 7, clAlpha: 4.8, pf: I.planform(0.5, 7, 0.5, 0, 0) } };
+  const ctx = { downwash: true, tailHeight: 0, front: { AR: 7, clAlpha: 4.8, clAlpha0: 4.8, pf: I.planform(0.5, 7, 0.5, 0, 0) } };
   const b = ctx.front.pf.b;
   const E = I.downwashGradient(ctx, { xAc: 0, slope: 4.8 }, { xAc: 0.5 * b }).E;
   assert.ok(E > 0.25 && E < 0.6, "dε/dα " + E);
@@ -269,4 +269,46 @@ test("rolling gust: wander measured from the initial course stays finite and gro
   assert.ok(Number.isFinite(r.per1km.lateral_m) && r.per1km.lateral_m > 0);
   assert.ok(r.disp[r.disp.length - 1].lateral_m > r.disp[0].lateral_m);
   assert.ok(r.chosen.sl.sigPhi > 0 && r.chosen.sl.sigP > 0);
+});
+
+test("ISA atmosphere matches standard values", () => {
+  const near = (a, b, tol) => Math.abs(a / b - 1) < tol;
+  const s0 = Model.isa(0), s5 = Model.isa(5000), s11 = Model.isa(11000), s20 = Model.isa(20000);
+  assert.ok(near(s0.rho, 1.225, 1e-3) && near(s0.a, 340.29, 1e-3) && near(s0.nu, 1.461e-5, 5e-3));
+  assert.ok(near(s5.rho, 0.7364, 2e-3) && near(s11.rho, 0.3639, 2e-3) && near(s20.rho, 0.08803, 3e-3));
+  assert.ok(near(s11.a, 295.07, 1e-3));
+});
+
+test("Prandtl–Glauert: no change at M = 0, slope rises with Mach (sweep reduces the rise)", () => {
+  assert.ok(Math.abs(I.helmbold(6, 2 * Math.PI, 0, 0) - I.helmbold(6, 2 * Math.PI, 0)) < 1e-12);
+  const r0 = I.helmbold(6, 2 * Math.PI, 0, 0.7) / I.helmbold(6, 2 * Math.PI, 0, 0);
+  const r45 = I.helmbold(6, 2 * Math.PI, 1, 0.7) / I.helmbold(6, 2 * Math.PI, 1, 0);
+  assert.ok(r0 > 1.1 && r0 < 1 / Math.sqrt(1 - 0.49), "between 1 and the 2D PG factor: " + r0);
+  assert.ok(r45 < r0, "sweep reduces compressibility effect");
+});
+
+test("drag divergence: Korn/Lock – thinner, supercritical and swept sections diverge later", () => {
+  const mk = (tc, kappaA, sweep) => ({ tc, kappaA, pf: I.planform(1, 6, 0.5, sweep, 0) });
+  const base = I.waveDrag(mk(0.12, 0.87, 0), 0.3, 0.8);
+  assert.ok(Math.abs(base.Mcrit - (base.Mdd - Math.cbrt(0.1 / 80))) < 1e-12);
+  assert.ok(base.CD > 0 && Math.abs(base.CD - 20 * Math.pow(0.8 - base.Mcrit, 4)) < 1e-12);
+  assert.ok(I.waveDrag(mk(0.06, 0.87, 0), 0.3, 0.8).Mdd > base.Mdd);
+  assert.ok(I.waveDrag(mk(0.12, 0.95, 0), 0.3, 0.8).Mdd > base.Mdd);
+  assert.ok(I.waveDrag(mk(0.12, 0.87, 35), 0.3, 0.8).Mdd > base.Mdd);
+  assert.strictEqual(I.waveDrag(mk(0.12, 0.87, 0), 0.3, 0.3).CD, 0);
+});
+
+test("altitude: available power lapses with σ^n and the envelope ceiling drops with more mass", () => {
+  const jet = { ...plane, hullLength_m: 4, hullDiameter_m: 0.35, xcg_m: 2.2, emptyMass_kg: 150, fuelMass_kg: 60,
+    frontArea_m2: 2.5, frontAR: 2.5, frontTaper: 0.1, frontSweepLE_deg: 50, frontXle_m: 1.3,
+    rearArea_m2: 0.5, rearAR: 3, rearXle_m: 3.4, finArea_m2: 0.35, finXle_m: 3.3, maxPower_kW: 300, nozzleDiameter_m: 0.25 };
+  const at = (h, d) => Model.analyze(d || jet, envOf({ altitude_m: h, cruiseSpeed_mps: 150 }), model);
+  const r0 = at(0), r8 = at(8000);
+  const n = model.engine.powerLapseExponent;
+  assert.ok(Math.abs(r8.ctx.powerFactor - Math.pow(Model.isa(8000).sigma, n)) < 1e-12 && Math.abs(r0.ctx.powerFactor - 1) < 1e-4);
+  assert.ok(r8.chosen.Mach > r0.chosen.Mach, "colder air → higher Mach at the same speed");
+  const E = r0.altEnvelope, Eh = at(0, { ...jet, emptyMass_kg: 400 }).altEnvelope;
+  const ceil = (E) => Math.max(...E.points.map(p => p.hMax == null ? -1 : p.hMax));
+  assert.ok(ceil(E) > 0 && ceil(Eh) < ceil(E), "heavier → lower ceiling");
+  assert.strictEqual(Model.analyze(jet, envOf({ useISA: false, density_kgpm3: 1005, kinematicViscosity_m2ps: 1.3e-6, speedOfSound_mps: 1480, cruiseSpeed_mps: 150 }), model).altEnvelope, null);
 });

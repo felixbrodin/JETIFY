@@ -356,8 +356,18 @@
     ],
     "environment": [
       {
+        "key": "altitude_m",
+        "label": "Altitude h (ISA)",
+        "unit": "m",
+        "kind": "slider",
+        "min": 0,
+        "max": 20000,
+        "step": 50,
+        "digits": 0
+      },
+      {
         "key": "density_kgpm3",
-        "label": "density ρ",
+        "label": "Density ρ (manual – used when ISA is off)",
         "unit": "kg/m³",
         "kind": "slider",
         "min": 0,
@@ -408,11 +418,19 @@
       },
       {
         "key": "kinematicViscosity_m2ps",
-        "label": "Kinematic viscosity ν",
+        "label": "Kinematic viscosity ν (manual – used when ISA is off)",
         "unit": "m²/s",
         "kind": "number",
         "step": 1e-08,
         "digits": 8
+      },
+      {
+        "key": "speedOfSound_mps",
+        "label": "Speed of sound a (manual – used when ISA is off; water ≈ 1480)",
+        "unit": "m/s",
+        "kind": "number",
+        "step": 1,
+        "digits": 1
       },
       {
         "key": "oswaldE",

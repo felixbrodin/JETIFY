@@ -54,10 +54,28 @@
     "Kv": 3.14159,
     "stallAlphaDeg": 25
   },
+  "atmosphere": {
+    "_note": "ISA 0-20 km. Envelope chart: altitude grid 0..envelopeMaxAltitude_m in envelopeAltitudeSteps, speed grid over the cruise-speed span in envelopeSpeedSteps.",
+    "envelopeMaxAltitude_m": 20000,
+    "envelopeAltitudeSteps": 40,
+    "envelopeSpeedSteps": 40
+  },
+  "engine": {
+    "_note": "Available power = P_max * (rho/rho0)^powerLapseExponent with ISA altitude. ~0.7 turbine-like; 1 = proportional to density; 0 = no lapse.",
+    "powerLapseExponent": 0.7
+  },
+  "compressibility": {
+    "_note": "Korn equation kappa_A: 0.87 conventional sections, 0.95 supercritical (per section in sections.json as kornKappa). idealSectionThickness = t/c assumed for the ideal 2-pi section.",
+    "defaultKornKappa": 0.87,
+    "idealSectionThickness": 0.1
+  },
   "limits": {
     "maxGustAlphaDeg": 10
   },
   "environmentDefaults": {
+    "useISA": true,
+    "altitude_m": 0,
+    "speedOfSound_mps": 340.29,
     "density_kgpm3": 1.225,
     "cruiseSpeed_mps": 100,
     "reserveFraction": 0.1,

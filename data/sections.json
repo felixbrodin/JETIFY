@@ -5,6 +5,7 @@
     "interpolates linearly in log10(Re); outside the range the nearest point is used (no extrapolation).",
     "clAlpha_perRad = 2D lift-curve slope, cdMin = minimum section drag (per planform area), clMax = 2D max lift.",
     "null for cdMin / clMax = use the environment values 'Fin profile drag CD0' / 'Fin CLmax'.",
+    "thickness_pct and kornKappa (default 0.87, supercritical 0.95) feed the Korn drag-divergence Mach number.",
     "IMPORTANT: the values below are APPROXIMATE, literature-typical numbers entered from memory, not",
     "digitised from the sources. Check each value against the cited source before using it to justify a design.",
     "confidence: 'typical' = well-documented section, value should be within a few %; 'rough' = sparse data,",
@@ -111,6 +112,7 @@
         { "Re": 2e5, "clAlpha_perRad": 5.5, "cdMin": 0.0110, "clMax": 0.80 },
         { "Re": 6e6, "clAlpha_perRad": 6.2, "cdMin": 0.0060, "clMax": 1.20 }
       ],
+      "kornKappa": 0.95,
       "confidence": "rough",
       "source": "Harris, NASA TP-2969 (1990) – coordinates; coefficients are rough estimates",
       "note": "Benefit is transonic wave drag only (M ≈ 0.7–0.8); no advantage at RC or AUV speeds."
