@@ -432,9 +432,10 @@
       row.appendChild(t); row.appendChild(d); sbox.appendChild(row);
     });
 
-    drawSideView(r);
-    drawCharts(r);
-    drawMap(Model.envelope(r, state.env));
+    // Each view drawn independently: a fault in one must not blank the others.
+    [() => drawMap(Model.envelope(r, state.env)), () => drawSideView(r), () => drawCharts(r)].forEach(f => {
+      try { f(); } catch (e) { console.error("Jetify render:", e); }
+    });
   }
 
   function chip(id, text, kind) {
@@ -648,7 +649,7 @@
         ],
         xLabel: "Speed (m/s)", yLabel: "Altitude (km)",
         markers: [{ x: c.V, label: "cruise " + fmt(c.V, 0) + " m/s" }],
-        hlines: ctx.atm ? [ctx.atm.h / 1000] : [],
+        hlines: r.ctx.atm ? [r.ctx.atm.h / 1000] : [],
         fmtY: (y) => fmt(y, 2) + " km",
         empty: "No speed in the scan allows steady level flight at any altitude up to " + fmt(E.hTop / 1000, 0) + " km."
       });
